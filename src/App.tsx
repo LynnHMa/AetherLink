@@ -24,7 +24,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   
   // Settings via localStorage
-  const [baseUrl, setBaseUrl] = useState(() => localStorage.getItem('llm_base_url') || 'https://newapi.lxhei.xyz/v1');
+  const [baseUrl, setBaseUrl] = useState(() => localStorage.getItem('llm_base_url') || '');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('llm_api_key') || '');
   const [chatModel, setChatModel] = useState(() => localStorage.getItem('llm_chat_model') || 'claude-opus-4.7');
   const [imageModel, setImageModel] = useState(() => localStorage.getItem('llm_image_model') || 'gpt2');
@@ -210,7 +210,8 @@ export default function App() {
   };
 
   const clearChat = () => {
-    if (window.confirm('Are you sure you want to clear the chat history?')) {
+    if (messages.length === 0) return;
+    if (window.confirm('是否清除当前对话并开启新对话？\n(Are you sure you want to clear the current chat and start a new one?)')) {
       setMessages([]);
     }
   };
