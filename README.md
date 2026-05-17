@@ -28,6 +28,49 @@ AetherLink 是一个成熟、美观且功能丰富的 Web 客户端，专为连�
 - 在输入框上方的按钮可以切换 **Chat (文本模式)** 和 **Image (图像模式)**。
 - Chat 模式下按 `Enter` 发送消息，按 `Shift + Enter` 换行。
 
+## 📦 部署与安装 (Deployment & Installation)
+
+本项目是一个全栈应用，前端基于 React (Vite)，后端基于 Express (Node.js) 用于代理 API 请求以解决跨域问题。建议部署在支持 Node.js 运行环境的服务器或平台上。
+
+### 💻 本地运行 (Local Development)
+
+1. 克隆代码并在根目录安装依赖:
+   ```bash
+   npm install
+   ```
+2. 启动开发服务器:
+   ```bash
+   npm run dev
+   ```
+   应用将运行在 `http://localhost:3000`。
+
+### 🚀 生产环境部署 (Production Deployment)
+
+你可以轻松地将项目部署到像 Render, Railway, Zeabur 或你自己的云服务器 / VPS 上。配置指南如下：
+
+**常规 Node.js 环境工作流:**
+1. 安装生产环境依赖:
+   ```bash
+   npm install
+   ```
+2. 构建项目 (打包前端静态文件并编译后端入口):
+   ```bash
+   npm run build
+   ```
+   *(这会在 `dist/` 目录下生成前端静态文件和编译后的 `server.cjs` 后端入口)*
+3. 启动生产服务:
+   ```bash
+   npm run start
+   ```
+
+**PaaS 平台 (如 Render / Railway / Zeabur) 通用配置:**
+* **Environment / Runtime**: `Node.js`
+* **Build Command (构建命令)**: `npm install && npm run build`
+* **Start Command (启动命令)**: `npm run start`
+* **Port (端口)**: `3000`
+
+> 💡 **提示**：应用使用环境变量解耦处理，运行中无需单独配置复杂的密钥环境变量，所有 API Key 等敏感配置都由用户直接在网页端安全设置并存储于浏览器本地缓存中。
+
 ## 🛠 技术栈
 
 - **Frontend**: React (Vite), Tailwind CSS, Lucide React (图标)
