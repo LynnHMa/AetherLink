@@ -1,0 +1,6 @@
+{
+  "name": "AetherLink",
+  "description": "Mature and functional web client for connecting to compatible LLM APIs with streaming and image generation support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
