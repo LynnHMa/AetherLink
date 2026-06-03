@@ -6,7 +6,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Chat completions endpoint proxy (supports streaming)
   app.post('/api/chat', async (req, res) => {
@@ -61,26 +62,61 @@ async function startServer() {
     const { prompt, model, baseUrl, apiKey, image } = req.body;
     
     try {
-      const url = `${baseUrl.replace(/\/$/, '')}/images/generations`;
-      const bodyPayload: any = { prompt, model, ...req.body };
-      delete bodyPayload.baseUrl;
-      delete bodyPayload.apiKey;
+      let url = `${baseUrl.replace(/\/$/, '')}/images/generations`;
+      let options: RequestInit;
 
-      // Ensure n and size are present for standards, but let proxy override if they want
-      if (!bodyPayload.n) bodyPayload.n = 1;
+      if (image && image.startsWith('data:image/')) {
+        url = `${baseUrl.replace(/\/$/, '')}/images/edits`;
+        
+        // Use Node's built-in FormData and Blob (Node 18+)
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+        formData.append('model', model);
+        if (req.body.n) formData.append('n', String(req.body.n));
+        
+        // OpenAi /images/edits requires a PNG. We pass the blob and specify a filename.
+        const base64Data = image.split(',')[1];
+        const mimeType = image.split(';')[0].split(':')[1];
+        const buffer = Buffer.from(base64Data, 'base64');
+        const blob = new Blob([buffer], { type: mimeType });
+        formData.append('image', blob, mimeType === 'image/png' ? 'image.png' : 'image.jpeg');
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(bodyPayload)
-      });
+        options = {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: formData as unknown as BodyInit
+        };
+      } else {
+        const bodyPayload: any = { prompt, model, ...req.body };
+        delete bodyPayload.baseUrl;
+        delete bodyPayload.apiKey;
+
+        // Ensure n and size are present for standards, but let proxy override if they want
+        if (!bodyPayload.n) bodyPayload.n = 1;
+
+        options = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(bodyPayload)
+        };
+      }
+
+      const response = await fetch(url, options);
 
       if (!response.ok) {
-        const err = await response.text();
-        return res.status(response.status).json({ error: err || response.statusText });
+        let errStr = await response.text();
+        try {
+          const errJson = JSON.parse(errStr);
+          if (errJson.error && errJson.error.message) {
+            errStr = errJson.error.message;
+          }
+        } catch (e) {}
+        return res.status(response.status).json({ error: errStr || response.statusText });
       }
 
       const data = await response.json();

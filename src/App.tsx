@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe } from 'lucide-react';
+import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
@@ -14,7 +14,9 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   isImage?: boolean;
+  imageUrl?: string;
   images?: string[];
+  model?: string;
 }
 
 const i18n = {
@@ -51,7 +53,10 @@ const i18n = {
     deleteModel: '删除当前模型',
     apiKeyMissing: '请输入您的 API Key (设置面板)。',
     generatingImage: '*正在生成图片...*',
-    langSwitch: 'Switch to English'
+    langSwitch: 'Switch to English',
+    cancel: '取消',
+    confirm: '确认',
+    add: '添加',
   },
   en: {
     newChat: 'New Chat',
@@ -86,7 +91,10 @@ const i18n = {
     deleteModel: 'Delete current model',
     apiKeyMissing: 'Please enter your API Key in settings.',
     generatingImage: '*Generating image...*',
-    langSwitch: '切换为中文'
+    langSwitch: '切换为中文',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    add: 'Add',
   }
 };
 
@@ -106,6 +114,11 @@ export default function App() {
   const [lang, setLang] = useState<'zh' | 'en'>(() => (localStorage.getItem('llm_lang') as 'zh' | 'en') || 'zh');
 
   const t = i18n[lang];
+
+  const [isClearingChat, setIsClearingChat] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
+  const [addingModelType, setAddingModelType] = useState<'text' | 'image' | null>(null);
+  const [newModelName, setNewModelName] = useState('');
 
   const [chatModels, setChatModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('llm_chat_models');
@@ -150,7 +163,7 @@ export default function App() {
     if ((!input.trim() && referenceImages.length === 0) || isLoading) return;
 
     if (!apiKey.trim()) {
-      alert(t.apiKeyMissing);
+      setSettingsError(t.apiKeyMissing);
       setIsSettingsOpen(true);
       return;
     }
@@ -180,19 +193,25 @@ export default function App() {
   const handleChatCompletion = async (userMsg: Message) => {
     const newChatHistory = [...messages, userMsg].map(m => {
       if (m.images && m.images.length > 0) {
+        const visionContent: any[] = [];
+        if (m.content && m.content.trim() !== '') {
+          visionContent.push({ type: 'text', text: m.content });
+        } else {
+          visionContent.push({ type: 'text', text: 'Please see the attached image.' });
+        }
+        m.images.forEach(img => {
+          visionContent.push({ type: 'image_url', image_url: { url: img } });
+        });
         return {
           role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.images.map(img => ({ type: 'image_url', image_url: { url: img } }))
-          ]
+          content: visionContent
         };
       }
       return { role: m.role, content: m.content };
     });
     const assistantId = Date.now().toString() + '-assistant';
     
-    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', model: chatModel }]);
 
     try {
       const response = await fetch('/api/chat', {
@@ -259,7 +278,7 @@ export default function App() {
 
   const handleImageGeneration = async (userMsg: Message) => {
     const assistantId = Date.now().toString() + '-assistant';
-    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage }]);
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage, model: imageModel }]);
     
     try {
       const payload: any = {
@@ -294,7 +313,7 @@ export default function App() {
 
       if (imageUrl) {
         setMessages(prev => prev.map(m => 
-          m.id === assistantId ? { ...m, content: `![Generated Image](${imageUrl})`, isImage: true } : m
+          m.id === assistantId ? { ...m, content: `![Generated Image](${imageUrl})`, isImage: true, imageUrl: imageUrl } : m
         ));
       } else {
         throw new Error('No image URL returned from API');
@@ -318,9 +337,44 @@ export default function App() {
 
   const clearChat = () => {
     if (messages.length === 0) return;
-    if (window.confirm(t.clearChatConfirm)) {
-      setMessages([]);
-    }
+    setIsClearingChat(true);
+  };
+
+  const processImageFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setReferenceImages(prev => [...prev, dataUrl]);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -334,13 +388,7 @@ export default function App() {
     const files = e.dataTransfer.files;
     if (files) {
       Array.from(files).forEach(file => {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            setReferenceImages(prev => [...prev, event.target?.result as string]);
-          };
-          reader.readAsDataURL(file);
-        }
+        processImageFile(file);
       });
     }
   };
@@ -352,11 +400,7 @@ export default function App() {
         if (items[i].type.indexOf('image') !== -1) {
           const file = items[i].getAsFile();
           if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              setReferenceImages(prev => [...prev, event.target?.result as string]);
-            };
-            reader.readAsDataURL(file);
+            processImageFile(file);
           }
         }
       }
@@ -367,9 +411,69 @@ export default function App() {
     setReferenceImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleCopyImage = async (url: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      
+      let copyBlob = blob;
+      if (blob.type !== 'image/png') {
+        const imageBitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = imageBitmap.width;
+        canvas.height = imageBitmap.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(imageBitmap, 0, 0);
+          copyBlob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((b) => {
+              if (b) resolve(b);
+              else reject(new Error('Canvas toBlob failed'));
+            }, 'image/png');
+          });
+        }
+      }
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': copyBlob
+        })
+      ]);
+    } catch (err) {
+      console.error('Failed to copy image: ', err);
+      alert('Copy failed / 复制失败');
+    }
+  };
+
   return (
     <div className="flex h-screen bg-[#0d0d0d] text-gray-100 overflow-hidden font-sans">
       
+      {/* Global Confirm Modal for Clearing Chat */}
+      {isClearingChat && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-6 shadow-2xl max-w-sm w-full">
+            <h3 className="text-lg font-bold text-white mb-2">{t.clearChatConfirm}</h3>
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                onClick={() => setIsClearingChat(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              >
+                {t.cancel}
+              </button>
+              <button 
+                onClick={() => {
+                  setMessages([]);
+                  setIsClearingChat(false);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-500 text-white transition-colors"
+              >
+                {t.confirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -501,7 +605,7 @@ export default function App() {
                     "text-xs font-bold uppercase tracking-tighter",
                     msg.role === 'user' ? "text-gray-500" : "text-blue-400"
                   )}>
-                    {msg.role === 'user' ? t.userRequest : t.assistantResponse}
+                    {msg.role === 'user' ? t.userRequest : (msg.model || t.assistantResponse)}
                   </div>
                   
                   {msg.role === 'user' ? (
@@ -510,8 +614,18 @@ export default function App() {
                       {msg.images && msg.images.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-2">
                           {msg.images.map((imgUrl, idx) => (
-                            <div key={idx} className="w-20 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0 shadow-sm">
+                            <div key={idx} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0 shadow-sm">
                               <img src={imgUrl} className="w-full h-full object-cover" alt="attachment" />
+                              <button 
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleCopyImage(imgUrl);
+                                }}
+                                className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black text-white rounded opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center outline-none focus:opacity-100"
+                                title="Copy image"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -519,9 +633,51 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="markdown-body prose prose-invert prose-sm md:prose-base max-w-none text-gray-300 break-words w-full leading-relaxed">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </ReactMarkdown>
+                      {msg.isImage && msg.imageUrl ? (
+                        <div className="relative group inline-block rounded-xl overflow-hidden shadow-lg border border-white/10 max-w-full">
+                          <img src={msg.imageUrl} alt="Generated" className="block max-w-[512px] w-full h-auto" />
+                          <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleCopyImage(msg.imageUrl!);
+                              }}
+                              className="p-2 bg-black/60 hover:bg-black text-white rounded-lg flex items-center justify-center outline-none focus:opacity-100"
+                              title="Copy image"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.preventDefault();
+                                fetch(msg.imageUrl!)
+                                  .then(res => res.blob())
+                                  .then(blob => {
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.style.display = 'none';
+                                    a.href = url;
+                                    a.download = `image-${Date.now()}.png`;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    window.URL.revokeObjectURL(url);
+                                  })
+                                  .catch(err => {
+                                    window.open(msg.imageUrl, '_blank');
+                                  });
+                              }}
+                              className="p-2 bg-black/60 hover:bg-black text-white rounded-lg flex items-center justify-center outline-none focus:opacity-100"
+                              title="Download image"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      )}
                     </div>
                   )}
                 </div>
@@ -621,14 +777,22 @@ export default function App() {
             <div className="p-5 border-b border-white/5 flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">{t.settings}</h3>
               <button 
-                onClick={() => setIsSettingsOpen(false)}
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  setSettingsError('');
+                }}
                 className="text-gray-500 hover:text-white p-1 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto w-full overflow-x-hidden">
+              {settingsError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg">
+                  {settingsError}
+                </div>
+              )}
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
                   {t.baseUrl}
@@ -638,7 +802,7 @@ export default function App() {
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white placeholder-gray-600"
-                  placeholder="https://api.openai.com/v1"
+                  placeholder=""
                 />
               </div>
 
@@ -659,100 +823,189 @@ export default function App() {
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
                   {t.textModel}
                 </label>
-                <div className="flex gap-2">
-                  <select 
-                    value={chatModel}
-                    onChange={(e) => setChatModel(e.target.value)}
-                    className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white"
-                  >
-                    {chatModels.map(model => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                  </select>
-                  <button 
-                    onClick={() => {
-                      const newModel = window.prompt(t.enterNewChatModel);
-                      if (newModel && newModel.trim() && !chatModels.includes(newModel.trim())) {
-                        setChatModels([...chatModels, newModel.trim()]);
-                        setChatModel(newModel.trim());
-                      }
-                    }}
-                    className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center group"
-                    title={t.addModel}
-                  >
-                    <PlusCircle className="w-4 h-4 text-gray-400 group-hover:text-white" />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (chatModels.length <= 1) {
-                         alert(t.atLeastOneModel);
-                         return;
-                      }
-                      if (window.confirm(`${t.removeModelConfirm}: ${chatModel}?`)) {
-                         const newList = chatModels.filter(m => m !== chatModel);
-                         setChatModels(newList);
-                         setChatModel(newList[0]);
-                      }
-                    }}
-                    className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center group"
-                    title={t.deleteModel}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500/60 group-hover:text-red-500" />
-                  </button>
-                </div>
+                {addingModelType === 'text' ? (
+                  <div className="flex gap-2">
+                    <input 
+                      autoFocus
+                      type="text" 
+                      value={newModelName}
+                      onChange={e => setNewModelName(e.target.value)}
+                      placeholder={t.enterNewChatModel}
+                      className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newModelName.trim()) {
+                          if (!chatModels.includes(newModelName.trim())) {
+                            setChatModels([...chatModels, newModelName.trim()]);
+                            setChatModel(newModelName.trim());
+                          }
+                          setAddingModelType(null);
+                          setNewModelName('');
+                        } else if (e.key === 'Escape') {
+                          setAddingModelType(null);
+                          setNewModelName('');
+                        }
+                      }}
+                    />
+                    <button 
+                      onClick={() => {
+                        if (newModelName.trim() && !chatModels.includes(newModelName.trim())) {
+                          setChatModels([...chatModels, newModelName.trim()]);
+                          setChatModel(newModelName.trim());
+                        }
+                        setAddingModelType(null);
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
+                    >
+                      {t.add}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setAddingModelType(null);
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      {t.cancel}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select 
+                      value={chatModel}
+                      onChange={(e) => setChatModel(e.target.value)}
+                      className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
+                    >
+                      {chatModels.map(model => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                        setAddingModelType('text');
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
+                      title={t.addModel}
+                    >
+                      <PlusCircle className="w-4 h-4 text-gray-400" />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (chatModels.length <= 1) {
+                           setSettingsError(t.atLeastOneModel);
+                           return;
+                        }
+                        const newList = chatModels.filter(m => m !== chatModel);
+                        setChatModels(newList);
+                        setChatModel(newList[0]);
+                      }}
+                      className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
+                      title={t.deleteModel}
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500/60" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
                   {t.imageModel}
                 </label>
-                <div className="flex gap-2">
-                  <select 
-                    value={imageModel}
-                    onChange={(e) => setImageModel(e.target.value)}
-                    className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white"
-                  >
-                    {imageModels.map(model => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                  </select>
-                  <button 
-                    onClick={() => {
-                      const newModel = window.prompt(t.enterNewImageModel);
-                      if (newModel && newModel.trim() && !imageModels.includes(newModel.trim())) {
-                        setImageModels([...imageModels, newModel.trim()]);
-                        setImageModel(newModel.trim());
-                      }
-                    }}
-                    className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center group"
-                    title={t.addModel}
-                  >
-                    <PlusCircle className="w-4 h-4 text-gray-400 group-hover:text-white" />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (imageModels.length <= 1) {
-                         alert(t.atLeastOneModel);
-                         return;
-                      }
-                      if (window.confirm(`${t.removeModelConfirm}: ${imageModel}?`)) {
-                         const newList = imageModels.filter(m => m !== imageModel);
-                         setImageModels(newList);
-                         setImageModel(newList[0]);
-                      }
-                    }}
-                    className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center group"
-                    title={t.deleteModel}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500/60 group-hover:text-red-500" />
-                  </button>
-                </div>
+                {addingModelType === 'image' ? (
+                  <div className="flex gap-2">
+                    <input 
+                      autoFocus
+                      type="text" 
+                      value={newModelName}
+                      onChange={e => setNewModelName(e.target.value)}
+                      placeholder={t.enterNewImageModel}
+                      className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newModelName.trim()) {
+                          if (!imageModels.includes(newModelName.trim())) {
+                            setImageModels([...imageModels, newModelName.trim()]);
+                            setImageModel(newModelName.trim());
+                          }
+                          setAddingModelType(null);
+                          setNewModelName('');
+                        } else if (e.key === 'Escape') {
+                          setAddingModelType(null);
+                          setNewModelName('');
+                        }
+                      }}
+                    />
+                    <button 
+                      onClick={() => {
+                        if (newModelName.trim() && !imageModels.includes(newModelName.trim())) {
+                          setImageModels([...imageModels, newModelName.trim()]);
+                          setImageModel(newModelName.trim());
+                        }
+                        setAddingModelType(null);
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
+                    >
+                      {t.add}
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setAddingModelType(null);
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      {t.cancel}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <select 
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value)}
+                      className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
+                    >
+                      {imageModels.map(model => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                        setAddingModelType('image');
+                        setNewModelName('');
+                      }}
+                      className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
+                      title={t.addModel}
+                    >
+                      <PlusCircle className="w-4 h-4 text-gray-400" />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (imageModels.length <= 1) {
+                           setSettingsError(t.atLeastOneModel);
+                           return;
+                        }
+                        const newList = imageModels.filter(m => m !== imageModel);
+                        setImageModels(newList);
+                        setImageModel(newList[0]);
+                      }}
+                      className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
+                      title={t.deleteModel}
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500/60" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="p-5 bg-black/40 border-t border-white/5 flex justify-end">
               <button 
-                onClick={() => setIsSettingsOpen(false)}
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  setSettingsError('');
+                }}
                 className="bg-white hover:bg-gray-200 text-black px-5 py-2 rounded-xl text-xs font-bold transition-colors shadow-lg"
               >
                 {t.saveClose}
