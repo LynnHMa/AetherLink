@@ -58,17 +58,24 @@ async function startServer() {
 
   // Image generations endpoint proxy
   app.post('/api/image', async (req, res) => {
-    const { prompt, model, baseUrl, apiKey } = req.body;
+    const { prompt, model, baseUrl, apiKey, image } = req.body;
     
     try {
       const url = `${baseUrl.replace(/\/$/, '')}/images/generations`;
+      const bodyPayload: any = { prompt, model, ...req.body };
+      delete bodyPayload.baseUrl;
+      delete bodyPayload.apiKey;
+
+      // Ensure n and size are present for standards, but let proxy override if they want
+      if (!bodyPayload.n) bodyPayload.n = 1;
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ prompt, model, n: 1, size: '512x512' })
+        body: JSON.stringify(bodyPayload)
       });
 
       if (!response.ok) {

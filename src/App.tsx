@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X } from 'lucide-react';
+import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
@@ -14,7 +14,81 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   isImage?: boolean;
+  images?: string[];
 }
+
+const i18n = {
+  zh: {
+    newChat: '新建对话',
+    history: '历史记录',
+    currentChat: '当前对话',
+    settings: '设置',
+    exportLog: '导出记录',
+    shareThread: '分享对话',
+    hello: '您好! 我是AI助手。',
+    helloSub: '在左侧设置您的 API Key 及 Base URL。之后可以直接与我对话或者生成图片。',
+    userRequest: '用户请求',
+    assistantResponse: '助手回复',
+    sendPlaceholderText: '发送消息 (Shift+Enter 换行)...',
+    sendPlaceholderImage: '输入图片描述...',
+    chat: '对话',
+    image: '图片',
+    send: '发送',
+    dropImage: '拖入或粘贴本地图片',
+    saveClose: '保存关闭',
+    baseUrl: 'Base URL (API 地址)',
+    apiKey: 'API Key (密钥)',
+    textModel: '文本对话模型 (Text Model)',
+    imageModel: '图片生成模型 (Image Model)',
+    atLeastOneModel: '至少保留一个模型！',
+    removeModelConfirm: '确定删除模型',
+    enterNewChatModel: '请输入新的文本模型名称',
+    enterNewImageModel: '请输入新的图片模型名称',
+    clearChatConfirm: '是否清除当前对话并开启新对话？',
+    noHistory: '无对话记录...',
+    msgCount: '消息',
+    addModel: '添加模型',
+    deleteModel: '删除当前模型',
+    apiKeyMissing: '请输入您的 API Key (设置面板)。',
+    generatingImage: '*正在生成图片...*',
+    langSwitch: 'Switch to English'
+  },
+  en: {
+    newChat: 'New Chat',
+    history: 'History',
+    currentChat: 'Current Chat',
+    settings: 'Settings',
+    exportLog: 'Export Log',
+    shareThread: 'Share Thread',
+    hello: 'Hello! I am your AI assistant.',
+    helloSub: 'Configure your API Key and Base URL on the left. Then you can chat with me or generate images.',
+    userRequest: 'User Request',
+    assistantResponse: 'Assistant Response',
+    sendPlaceholderText: 'Send a message (Shift+Enter for new line)...',
+    sendPlaceholderImage: 'Enter image prompt...',
+    chat: 'Chat',
+    image: 'Image',
+    send: 'Send',
+    dropImage: 'Drop or paste local images here',
+    saveClose: 'Save & Close',
+    baseUrl: 'Base URL',
+    apiKey: 'API Key',
+    textModel: 'Text Model',
+    imageModel: 'Image Model',
+    atLeastOneModel: 'At least one model is required!',
+    removeModelConfirm: 'Are you sure you want to remove model',
+    enterNewChatModel: 'Enter new chat model name:',
+    enterNewImageModel: 'Enter new image model name:',
+    clearChatConfirm: 'Are you sure you want to clear the current chat and start a new one?',
+    noHistory: 'No history...',
+    msgCount: 'msgs',
+    addModel: 'Add model',
+    deleteModel: 'Delete current model',
+    apiKeyMissing: 'Please enter your API Key in settings.',
+    generatingImage: '*Generating image...*',
+    langSwitch: '切换为中文'
+  }
+};
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -29,6 +103,9 @@ export default function App() {
   const [chatModel, setChatModel] = useState(() => localStorage.getItem('llm_chat_model') || 'claude-opus-4.7');
   const [imageModel, setImageModel] = useState(() => localStorage.getItem('llm_image_model') || 'gpt2');
   const [mode, setMode] = useState<'text' | 'image'>(() => (localStorage.getItem('llm_mode') as 'text' | 'image') || 'text');
+  const [lang, setLang] = useState<'zh' | 'en'>(() => (localStorage.getItem('llm_lang') as 'zh' | 'en') || 'zh');
+
+  const t = i18n[lang];
 
   const [chatModels, setChatModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('llm_chat_models');
@@ -38,6 +115,9 @@ export default function App() {
     const saved = localStorage.getItem('llm_image_models');
     return saved ? JSON.parse(saved) : ['gpt2', 'dall-e-3', 'stable-diffusion-xl'];
   });
+
+  const [referenceImages, setReferenceImages] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -50,7 +130,8 @@ export default function App() {
     localStorage.setItem('llm_mode', mode);
     localStorage.setItem('llm_chat_models', JSON.stringify(chatModels));
     localStorage.setItem('llm_image_models', JSON.stringify(imageModels));
-  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels]);
+    localStorage.setItem('llm_lang', lang);
+  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -66,17 +147,23 @@ export default function App() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && referenceImages.length === 0) || isLoading) return;
 
     if (!apiKey.trim()) {
-      alert('请输入您的 API Key (设置面板)。 \nPlease enter your API Key in settings.');
+      alert(t.apiKeyMissing);
       setIsSettingsOpen(true);
       return;
     }
 
-    const userMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
+    const userMessage: Message = { 
+      id: Date.now().toString(), 
+      role: 'user', 
+      content: input,
+      images: referenceImages.length > 0 ? [...referenceImages] : undefined
+    };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setReferenceImages([]);
     setIsLoading(true);
 
     if (mode === 'text') {
@@ -91,7 +178,18 @@ export default function App() {
   };
 
   const handleChatCompletion = async (userMsg: Message) => {
-    const newChatHistory = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+    const newChatHistory = [...messages, userMsg].map(m => {
+      if (m.images && m.images.length > 0) {
+        return {
+          role: m.role,
+          content: [
+            { type: 'text', text: m.content },
+            ...m.images.map(img => ({ type: 'image_url', image_url: { url: img } }))
+          ]
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
     const assistantId = Date.now().toString() + '-assistant';
     
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
@@ -161,20 +259,29 @@ export default function App() {
 
   const handleImageGeneration = async (userMsg: Message) => {
     const assistantId = Date.now().toString() + '-assistant';
-    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '*正在生成图片... (Generating image...)*' }]);
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage }]);
     
     try {
+      const payload: any = {
+          prompt: userMsg.content,
+          model: imageModel,
+          baseUrl,
+          apiKey
+      };
+
+      if (userMsg.images && userMsg.images.length > 0) {
+        payload.image = userMsg.images[0];
+        payload.image_base64 = userMsg.images[0];
+        payload.image_url = userMsg.images[0];
+        payload.images = userMsg.images;
+      }
+
       const response = await fetch('/api/image', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          prompt: userMsg.content,
-          model: imageModel,
-          baseUrl,
-          apiKey
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -211,9 +318,53 @@ export default function App() {
 
   const clearChat = () => {
     if (messages.length === 0) return;
-    if (window.confirm('是否清除当前对话并开启新对话？\n(Are you sure you want to clear the current chat and start a new one?)')) {
+    if (window.confirm(t.clearChatConfirm)) {
       setMessages([]);
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    if (files) {
+      Array.from(files).forEach(file => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            setReferenceImages(prev => [...prev, event.target?.result as string]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              setReferenceImages(prev => [...prev, event.target?.result as string]);
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+      }
+    }
+  };
+
+  const removeReferenceImage = (index: number) => {
+    setReferenceImages(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -251,19 +402,19 @@ export default function App() {
             className="w-full flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg py-2.5 transition-all text-sm font-medium"
           >
             <PlusCircle className="w-4 h-4 text-gray-400" />
-            新建对话 (New Chat)
+            {t.newChat}
           </button>
           
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3 px-2">历史记录</div>
+            <div className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3 px-2">{t.history}</div>
             {messages.length === 0 ? (
               <div className="px-2 py-3 text-sm text-gray-500">
-                无对话记录...
+                {t.noHistory}
               </div>
             ) : (
               <div className="group flex items-center justify-between p-2 rounded-lg bg-blue-600/10 text-blue-400">
                 <span className="text-sm truncate flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" /> 当前对话 ({messages.length} 消息)
+                  <MessageSquare className="w-4 h-4" /> {t.currentChat} ({messages.length} {t.msgCount})
                 </span>
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
               </div>
@@ -271,13 +422,20 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mt-auto p-4 border-t border-white/5">
+        <div className="mt-auto p-4 border-t border-white/5 space-y-2">
+          <button 
+            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-sm transition-colors text-gray-400 hover:text-white text-left"
+          >
+            <Globe className="w-4 h-4" />
+            {t.langSwitch}
+          </button>
           <button 
             onClick={() => setIsSettingsOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-sm transition-colors text-gray-400 hover:text-white text-left"
           >
             <Settings className="w-4 h-4" />
-            设置 (Settings)
+            {t.settings}
           </button>
         </div>
       </div>
@@ -301,8 +459,8 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <button className="text-xs font-medium text-gray-400 hover:text-white">导出记录</button>
-            <button className="text-xs font-medium bg-white text-black px-4 py-1.5 rounded-full hover:bg-gray-200 shadow-sm transition-colors">分享对话</button>
+            <button className="text-xs font-medium text-gray-400 hover:text-white">{t.exportLog}</button>
+            <button className="text-xs font-medium bg-white text-black px-4 py-1.5 rounded-full hover:bg-gray-200 shadow-sm transition-colors">{t.shareThread}</button>
           </div>
         </header>
 
@@ -313,10 +471,9 @@ export default function App() {
               <div className="w-16 h-16 bg-blue-600/10 flex items-center justify-center rounded-2xl mb-4 border border-blue-500/20">
                 <Bot className="w-8 h-8 text-blue-500" />
               </div>
-              <h2 className="text-2xl font-semibold mb-2 text-gray-100">您好! 我是AI助手。</h2>
+              <h2 className="text-2xl font-semibold mb-2 text-gray-100">{t.hello}</h2>
               <p className="text-gray-400 max-w-md text-sm leading-relaxed text-balance">
-                在左侧设置您的 API Key 及 Base URL。之后可以直接与我对话或者生成图片。<br/><br/>
-                Configure your API Key and Base URL in the settings. You can then chat with me or generate images.
+                {t.helloSub}
               </p>
             </div>
           )}
@@ -344,12 +501,21 @@ export default function App() {
                     "text-xs font-bold uppercase tracking-tighter",
                     msg.role === 'user' ? "text-gray-500" : "text-blue-400"
                   )}>
-                    {msg.role === 'user' ? 'User Request' : 'Assistant Response'}
+                    {msg.role === 'user' ? t.userRequest : t.assistantResponse}
                   </div>
                   
                   {msg.role === 'user' ? (
                     <div className="text-gray-300 leading-relaxed whitespace-pre-wrap break-words text-sm sm:text-base">
                       {msg.content}
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {msg.images.map((imgUrl, idx) => (
+                            <div key={idx} className="w-20 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0 shadow-sm">
+                              <img src={imgUrl} className="w-full h-full object-cover" alt="attachment" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="markdown-body prose prose-invert prose-sm md:prose-base max-w-none text-gray-300 break-words w-full leading-relaxed">
@@ -366,14 +532,39 @@ export default function App() {
         </div>
 
         {/* Input Area */}
-        <div className="p-8 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent absolute bottom-0 left-0 right-0 md:left-64 z-10">
+        <div 
+          className="p-8 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent absolute bottom-0 left-0 right-0 md:left-64 z-10"
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onPaste={handlePaste}
+        >
           <div className="max-w-3xl mx-auto relative">
             <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-2 shadow-2xl focus-within:border-blue-500/50 transition-colors">
+              {referenceImages.length > 0 && (
+                <div className="px-4 pt-4 pb-2 flex flex-wrap gap-3">
+                  {referenceImages.map((refImg, idx) => (
+                    <div key={idx} className="relative group rounded-lg overflow-hidden border border-white/10 w-16 h-16 shadow-lg shrink-0">
+                      <img src={refImg} alt="Reference" className="w-full h-full object-cover" />
+                      <button 
+                        onClick={() => removeReferenceImage(idx)}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                      >
+                        <X className="w-5 h-5 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {referenceImages.length === 0 && (
+                <div className="px-4 pt-2 text-[10px] text-gray-500 uppercase flex items-center gap-2">
+                  <span>{t.dropImage}</span>
+                </div>
+              )}
               <textarea
                 ref={inputRef}
                 rows={1}
                 className="w-full max-h-48 bg-transparent border-none outline-none resize-none hide-scrollbar text-sm text-white placeholder-gray-500 px-4 pt-2"
-                placeholder={mode === 'text' ? "发送消息 (Send a message)... Shift+Enter 换行" : "输入图片描述 (Image prompt)..."}
+                placeholder={mode === 'text' ? t.sendPlaceholderText : t.sendPlaceholderImage}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -391,7 +582,7 @@ export default function App() {
                       )}
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
-                      Chat
+                      {t.chat}
                     </button>
                     <button
                       onClick={() => setMode('image')}
@@ -401,17 +592,17 @@ export default function App() {
                       )}
                     >
                       <ImageIcon className="w-3.5 h-3.5" />
-                      Image
+                      {t.image}
                     </button>
                   </div>
                 </div>
 
                 <button
-                  disabled={isLoading || !input.trim()}
+                  disabled={isLoading || (!input.trim() && referenceImages.length === 0)}
                   onClick={handleSubmit}
                   className="bg-white text-black text-xs font-bold px-4 py-2 flex items-center justify-center gap-2 rounded-xl transition-colors shadow-lg hover:bg-gray-200 disabled:opacity-50 disabled:hover:bg-white"
                 >
-                  <span className="hidden md:inline">发送 (Send)</span>
+                  <span className="hidden md:inline">{t.send}</span>
                   <Send className="w-3 h-3 md:hidden" />
                 </button>
               </div>
@@ -428,7 +619,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl shadow-black/50 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-gray-200">
             <div className="p-5 border-b border-white/5 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">设置 (Settings)</h3>
+              <h3 className="text-lg font-semibold text-white">{t.settings}</h3>
               <button 
                 onClick={() => setIsSettingsOpen(false)}
                 className="text-gray-500 hover:text-white p-1 transition-colors"
@@ -440,7 +631,7 @@ export default function App() {
             <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  Base URL (API 地址)
+                  {t.baseUrl}
                 </label>
                 <input 
                   type="text" 
@@ -453,7 +644,7 @@ export default function App() {
 
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  API Key (密钥)
+                  {t.apiKey}
                 </label>
                 <input 
                   type="password" 
@@ -466,7 +657,7 @@ export default function App() {
 
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  Text Model (文本对话模型)
+                  {t.textModel}
                 </label>
                 <div className="flex gap-2">
                   <select 
@@ -480,31 +671,31 @@ export default function App() {
                   </select>
                   <button 
                     onClick={() => {
-                      const newModel = window.prompt('请输入新的文本模型名称 (Enter new chat model name):');
+                      const newModel = window.prompt(t.enterNewChatModel);
                       if (newModel && newModel.trim() && !chatModels.includes(newModel.trim())) {
                         setChatModels([...chatModels, newModel.trim()]);
                         setChatModel(newModel.trim());
                       }
                     }}
                     className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center group"
-                    title="添加模型 (Add model)"
+                    title={t.addModel}
                   >
                     <PlusCircle className="w-4 h-4 text-gray-400 group-hover:text-white" />
                   </button>
                   <button 
                     onClick={() => {
                       if (chatModels.length <= 1) {
-                         alert('至少保留一个模型！(At least one model is required)');
+                         alert(t.atLeastOneModel);
                          return;
                       }
-                      if (window.confirm(`确定删除模型 ${chatModel} 吗？(Remove model?)`)) {
+                      if (window.confirm(`${t.removeModelConfirm}: ${chatModel}?`)) {
                          const newList = chatModels.filter(m => m !== chatModel);
                          setChatModels(newList);
                          setChatModel(newList[0]);
                       }
                     }}
                     className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center group"
-                    title="删除当前模型 (Delete current model)"
+                    title={t.deleteModel}
                   >
                     <Trash2 className="w-4 h-4 text-red-500/60 group-hover:text-red-500" />
                   </button>
@@ -513,7 +704,7 @@ export default function App() {
 
               <div>
                 <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  Image Model (图片生成模型)
+                  {t.imageModel}
                 </label>
                 <div className="flex gap-2">
                   <select 
@@ -527,31 +718,31 @@ export default function App() {
                   </select>
                   <button 
                     onClick={() => {
-                      const newModel = window.prompt('请输入新的图片模型名称 (Enter new image model name):');
+                      const newModel = window.prompt(t.enterNewImageModel);
                       if (newModel && newModel.trim() && !imageModels.includes(newModel.trim())) {
                         setImageModels([...imageModels, newModel.trim()]);
                         setImageModel(newModel.trim());
                       }
                     }}
                     className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center group"
-                    title="添加模型 (Add model)"
+                    title={t.addModel}
                   >
                     <PlusCircle className="w-4 h-4 text-gray-400 group-hover:text-white" />
                   </button>
                   <button 
                     onClick={() => {
                       if (imageModels.length <= 1) {
-                         alert('至少保留一个模型！(At least one model is required)');
+                         alert(t.atLeastOneModel);
                          return;
                       }
-                      if (window.confirm(`确定删除模型 ${imageModel} 吗？(Remove model?)`)) {
+                      if (window.confirm(`${t.removeModelConfirm}: ${imageModel}?`)) {
                          const newList = imageModels.filter(m => m !== imageModel);
                          setImageModels(newList);
                          setImageModel(newList[0]);
                       }
                     }}
                     className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center group"
-                    title="删除当前模型 (Delete current model)"
+                    title={t.deleteModel}
                   >
                     <Trash2 className="w-4 h-4 text-red-500/60 group-hover:text-red-500" />
                   </button>
@@ -564,7 +755,7 @@ export default function App() {
                 onClick={() => setIsSettingsOpen(false)}
                 className="bg-white hover:bg-gray-200 text-black px-5 py-2 rounded-xl text-xs font-bold transition-colors shadow-lg"
               >
-                保存关闭 (Save & Close)
+                {t.saveClose}
               </button>
             </div>
           </div>
