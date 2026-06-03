@@ -346,18 +346,49 @@ export default function App() {
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage, model: imageModel }]);
     
     try {
+      const allMsgs = [...messages, userMsg];
+      
+      let targetImage = '';
+      const latestWithImage = [...allMsgs].reverse().find(m => (m.images && m.images.length > 0) || m.imageUrl);
+      
+      if (latestWithImage) {
+        if (latestWithImage.images && latestWithImage.images.length > 0) {
+          targetImage = latestWithImage.images[0];
+        } else if (latestWithImage.imageUrl) {
+          targetImage = latestWithImage.imageUrl;
+        }
+      }
+
+      let finalPrompt = userMsg.content;
+      const userPrompts = allMsgs.filter(m => m.role === 'user' && m.content).map(m => m.content);
+      if (userPrompts.length > 1) {
+        finalPrompt = `Base context: ${userPrompts.slice(0, -1).join(' -> ')}. Apply modification: ${userMsg.content}`;
+      }
+
       const payload: any = {
-          prompt: userMsg.content,
+          prompt: finalPrompt,
           model: imageModel,
           baseUrl,
           apiKey
       };
 
-      if (userMsg.images && userMsg.images.length > 0) {
-        payload.image = userMsg.images[0];
-        payload.image_base64 = userMsg.images[0];
-        payload.image_url = userMsg.images[0];
-        payload.images = userMsg.images;
+      if (targetImage) {
+        if (!targetImage.startsWith('data:')) {
+          try {
+            const fetchUrl = `/api/proxy-image?url=${encodeURIComponent(targetImage)}`;
+            const res = await fetch(fetchUrl);
+            const blob = await res.blob();
+            targetImage = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } catch (e) {
+            console.error('Failed to parse targetImage', e);
+          }
+        }
+        payload.image = targetImage;
       }
 
       const response = await fetch('/api/image', {
@@ -510,7 +541,6 @@ export default function App() {
           'image/png': copyBlob
         })
       ]);
-      alert(lang === 'zh' ? '图片已复制！' : 'Image copied to clipboard!');
     } catch (err) {
       console.error('Failed to copy image: ', err);
       alert(lang === 'zh' ? '复制失败，请尝试点击上方下载按钮' : 'Copy failed, please try downloading.');
@@ -689,9 +719,10 @@ export default function App() {
         </header>
 
         {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto w-full max-w-4xl mx-auto flex flex-col p-4 md:p-8 pb-[200px]">
-          {messages.length === 0 && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+        <div className="flex-1 overflow-y-auto w-full mx-auto flex flex-col scroll-smooth">
+          <div className="max-w-4xl mx-auto w-full p-4 md:p-8">
+            {messages.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
               <div className="w-16 h-16 bg-blue-600/10 flex items-center justify-center rounded-2xl mb-4 border border-blue-500/20">
                 <Bot className="w-8 h-8 text-blue-500" />
               </div>
@@ -803,13 +834,14 @@ export default function App() {
                 </div>
               </div>
             ))}
-            <div ref={messagesEndRef} className="h-4" />
+            <div ref={messagesEndRef} className="h-6" />
           </div>
         </div>
+      </div>
 
-        {/* Input Area */}
+      {/* Input Area */}
         <div 
-          className="p-8 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent absolute bottom-0 left-0 right-0 md:left-64 z-10"
+          className="px-4 py-3 md:px-8 md:pt-5 md:pb-4 bg-[#0d0d0d] z-10 shrink-0 border-t border-white/5"
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onPaste={handlePaste}
@@ -883,7 +915,7 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <p className="text-[10px] text-center text-gray-600 mt-3 uppercase tracking-widest">
+            <p className="text-[10px] text-center text-gray-600 mt-2 mb-0 uppercase tracking-widest leading-none">
               AI can make mistakes. Please verify important information.
             </p>
           </div>
