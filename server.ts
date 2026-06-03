@@ -127,6 +127,21 @@ async function startServer() {
     }
   });
 
+  // Proxy for fetching images to bypass CORS
+  app.get('/api/proxy-image', async (req, res) => {
+    try {
+      const imageUrl = req.query.url as string;
+      if (!imageUrl) return res.status(400).send('Missing url');
+      const response = await fetch(imageUrl);
+      if (!response.ok) return res.status(response.status).send(response.statusText);
+      const buffer = await response.arrayBuffer();
+      res.set('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+      res.send(Buffer.from(buffer));
+    } catch (e: any) {
+      res.status(500).send(e.message);
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
