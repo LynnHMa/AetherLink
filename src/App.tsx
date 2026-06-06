@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy } from 'lucide-react';
+import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy, RefreshCcw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
@@ -17,6 +17,7 @@ interface Message {
   imageUrl?: string;
   images?: string[];
   model?: string;
+  isError?: boolean;
 }
 
 interface ChatSession {
@@ -64,6 +65,8 @@ const i18n = {
     cancel: '取消',
     confirm: '确认',
     add: '添加',
+    autoRetryError: '自动重试出错请求',
+    autoRetryDesc: '如遇到错误则继续自动重试',
   },
   en: {
     newChat: 'New Chat',
@@ -102,6 +105,8 @@ const i18n = {
     cancel: 'Cancel',
     confirm: 'Confirm',
     add: 'Add',
+    autoRetryError: 'Auto-retry on Error',
+    autoRetryDesc: 'Keep retrying automatically if error occurs',
   }
 };
 
@@ -128,6 +133,12 @@ export default function App() {
   const [imageModel, setImageModel] = useState(() => localStorage.getItem('llm_image_model') || 'gpt2');
   const [mode, setMode] = useState<'text' | 'image'>(() => (localStorage.getItem('llm_mode') as 'text' | 'image') || 'text');
   const [lang, setLang] = useState<'zh' | 'en'>(() => (localStorage.getItem('llm_lang') as 'zh' | 'en') || 'zh');
+  const [autoRetry, setAutoRetry] = useState<boolean>(() => localStorage.getItem('llm_auto_retry') === 'true');
+
+  const autoRetryRef = useRef(autoRetry);
+  useEffect(() => {
+    autoRetryRef.current = autoRetry;
+  }, [autoRetry]);
 
   const t = i18n[lang];
 
@@ -209,7 +220,8 @@ export default function App() {
     localStorage.setItem('llm_chat_models', JSON.stringify(chatModels));
     localStorage.setItem('llm_image_models', JSON.stringify(imageModels));
     localStorage.setItem('llm_lang', lang);
-  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang]);
+    localStorage.setItem('llm_auto_retry', autoRetry.toString());
+  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -278,150 +290,215 @@ export default function App() {
     
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', model: chatModel }]);
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: newChatHistory,
-          model: chatModel,
-          baseUrl,
-          apiKey,
-          stream: true
-        })
-      });
+    let isSuccess = false;
+    let attempt = 0;
+    while (!isSuccess) {
+      attempt++;
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: newChatHistory,
+            model: chatModel,
+            baseUrl,
+            apiKey,
+            stream: true
+          })
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
 
-      if (!response.body) throw new Error('No response body');
+        if (!response.body) throw new Error('No response body');
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
         
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete line
-        
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data: ')) {
-            const dataStr = trimmed.substring(6);
-            if (dataStr === '[DONE]') continue;
-            
-            try {
-              const data = JSON.parse(dataStr);
-              const contentDelta = data.choices?.[0]?.delta?.content;
-              if (contentDelta) {
-                setMessages(prev => prev.map(m => 
-                  m.id === assistantId ? { ...m, content: m.content + contentDelta } : m
-                ));
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // keep incomplete line
+          
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('data: ')) {
+              const dataStr = trimmed.substring(6);
+              if (dataStr === '[DONE]') continue;
+              
+              try {
+                const data = JSON.parse(dataStr);
+                const contentDelta = data.choices?.[0]?.delta?.content;
+                if (contentDelta) {
+                  setMessages(prev => prev.map(m => 
+                    m.id === assistantId ? { ...m, content: m.content + contentDelta, isError: false } : m
+                  ));
+                }
+              } catch (err) {
+                // Ignore incomplete JSON chunks parse errors
               }
-            } catch (err) {
-              // Ignore incomplete JSON chunks parse errors
             }
           }
         }
+        isSuccess = true;
+      } catch (error: any) {
+        if (!autoRetryRef.current) {
+          setMessages(prev => prev.map(m => 
+            m.id === assistantId ? { ...m, content: m.content + `\n\n**Error:** ${error.message}`, isError: true } : m
+          ));
+          break;
+        } else {
+          setMessages(prev => prev.map(m => 
+            m.id === assistantId ? { ...m, content: `**Error:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false } : m
+          ));
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
-    } catch (error: any) {
-      setMessages(prev => prev.map(m => 
-        m.id === assistantId ? { ...m, content: m.content + `\n\n**Error:** ${error.message}` } : m
-      ));
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   };
 
   const handleImageGeneration = async (userMsg: Message) => {
     const assistantId = Date.now().toString() + '-assistant';
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage, model: imageModel }]);
     
-    try {
-      const allMsgs = [...messages, userMsg];
-      
-      let targetImage = '';
-      const latestWithImage = [...allMsgs].reverse().find(m => (m.images && m.images.length > 0) || m.imageUrl);
-      
-      if (latestWithImage) {
-        if (latestWithImage.images && latestWithImage.images.length > 0) {
-          targetImage = latestWithImage.images[0];
-        } else if (latestWithImage.imageUrl) {
-          targetImage = latestWithImage.imageUrl;
-        }
-      }
-
-      let finalPrompt = userMsg.content;
-      const userPrompts = allMsgs.filter(m => m.role === 'user' && m.content).map(m => m.content);
-      if (userPrompts.length > 1) {
-        finalPrompt = `Base context: ${userPrompts.slice(0, -1).join(' -> ')}. Apply modification: ${userMsg.content}`;
-      }
-
-      const payload: any = {
-          prompt: finalPrompt,
-          model: imageModel,
-          baseUrl,
-          apiKey
-      };
-
-      if (targetImage) {
-        if (!targetImage.startsWith('data:')) {
-          try {
-            const fetchUrl = `/api/proxy-image?url=${encodeURIComponent(targetImage)}`;
-            const res = await fetch(fetchUrl);
-            const blob = await res.blob();
-            targetImage = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          } catch (e) {
-            console.error('Failed to parse targetImage', e);
+    let isSuccess = false;
+    let attempt = 0;
+    while (!isSuccess) {
+      attempt++;
+      try {
+        const allMsgs = [...messages, userMsg];
+        
+        let targetImages: string[] = [];
+        const latestWithImage = [...allMsgs].reverse().find(m => (m.images && m.images.length > 0) || m.imageUrl);
+        
+        if (latestWithImage) {
+          if (latestWithImage.images && latestWithImage.images.length > 0) {
+            targetImages = [...latestWithImage.images];
+          } else if (latestWithImage.imageUrl) {
+            targetImages = [latestWithImage.imageUrl];
           }
         }
-        payload.image = targetImage;
+
+        let finalPrompt = userMsg.content;
+        const userPrompts = allMsgs.filter(m => m.role === 'user' && m.content).map(m => m.content);
+        if (userPrompts.length > 1) {
+          finalPrompt = `Base context: ${userPrompts.slice(0, -1).join(' -> ')}. Apply modification: ${userMsg.content}`;
+        }
+
+        const payload: any = {
+            prompt: finalPrompt,
+            model: imageModel,
+            size: "1024x1024",
+            n: 1,
+            baseUrl,
+            apiKey
+        };
+
+        if (targetImages.length > 0) {
+          const processedImages = await Promise.all(targetImages.map(async (img) => {
+            if (!img.startsWith('data:')) {
+              try {
+                const fetchUrl = `/api/proxy-image?url=${encodeURIComponent(img)}`;
+                const res = await fetch(fetchUrl);
+                const blob = await res.blob();
+                return await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+              } catch (e) {
+                console.error('Failed to parse targetImage', e);
+                return img;
+              }
+            }
+            return img;
+          }));
+          payload.image = processedImages[0];
+          payload.images = processedImages;
+        }
+
+        const response = await fetch('/api/image', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+           let errMsg = await response.text();
+           try {
+             const errObj = JSON.parse(errMsg);
+             errMsg = errObj.error?.message || errObj.error || errMsg;
+           } catch(e) {}
+           throw new Error(`API Proxy Error (${response.status}): ${errMsg}`);
+        }
+
+        let data;
+        const rawResponseText = await response.text();
+        try {
+          data = JSON.parse(rawResponseText);
+        } catch (err) {
+          throw new Error(`JSON parse error. Server returned: ${rawResponseText.slice(0, 200).replace(/\n/g, ' ')}`);
+        }
+
+        const imageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
+
+        if (imageUrl) {
+          setMessages(prev => prev.map(m => 
+            m.id === assistantId ? { ...m, content: `![Generated Image](${imageUrl})`, isImage: true, imageUrl: imageUrl, isError: false } : m
+          ));
+        } else {
+          throw new Error(`Proxy Success (200), but missing image URL. Proxy response: ${JSON.stringify(data).slice(0, 500)}`);
+        }
+        isSuccess = true;
+      } catch (error: any) {
+        if (!autoRetryRef.current) {
+          setMessages(prev => prev.map(m => 
+            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}`, isError: true } : m
+          ));
+          break;
+        } else {
+          setMessages(prev => prev.map(m => 
+            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false } : m
+          ));
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
-
-      const response = await fetch('/api/image', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-         const errorData = await response.json().catch(() => ({}));
-         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const imageUrl = data.data?.[0]?.url;
-
-      if (imageUrl) {
-        setMessages(prev => prev.map(m => 
-          m.id === assistantId ? { ...m, content: `![Generated Image](${imageUrl})`, isImage: true, imageUrl: imageUrl } : m
-        ));
-      } else {
-        throw new Error('No image URL returned from API');
-      }
-
-    } catch (error: any) {
-      setMessages(prev => prev.map(m => 
-        m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}` } : m
-      ));
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
+  };
+
+  const handleRetry = async (msgId: string) => {
+    const errorIndex = messages.findIndex(m => m.id === msgId);
+    if (errorIndex <= 0) return;
+    
+    const errorMsg = messages[errorIndex];
+    let prevMsg = messages.slice(0, errorIndex).reverse().find(m => m.role === 'user');
+    if (!prevMsg) return;
+
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    setIsLoading(true);
+
+    if (errorMsg.content.includes('Error Generating Image:')) {
+      await handleImageGeneration(prevMsg);
+    } else {
+      await handleChatCompletion(prevMsg);
+    }
+    
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -443,8 +520,8 @@ export default function App() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1024;
-        const MAX_HEIGHT = 1024;
+        const MAX_WIDTH = 512;
+        const MAX_HEIGHT = 512;
         let width = img.width;
         let height = img.height;
 
@@ -825,9 +902,20 @@ export default function App() {
                           </div>
                         </div>
                       ) : (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
+                        <div className="flex flex-col gap-3 w-full">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                          {msg.isError && (
+                            <button
+                              onClick={() => handleRetry(msg.id)}
+                              className="self-start mt-2 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-600/30 rounded flex items-center gap-2 text-sm font-medium transition-colors outline-none"
+                            >
+                              <RefreshCcw className="w-4 h-4" />
+                              Retry
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1149,6 +1237,19 @@ export default function App() {
                     </button>
                   </div>
                 )}
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  <div className="text-sm font-medium text-white">{t.autoRetryError}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{t.autoRetryDesc}</div>
+                </div>
+                <button
+                  onClick={() => setAutoRetry(!autoRetry)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${autoRetry ? 'bg-blue-600' : 'bg-gray-700'}`}
+                >
+                  <div className={`absolute top-1 max-w-full bottom-1 w-4 h-4 rounded-full bg-white transition-transform ${autoRetry ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
               </div>
             </div>
 

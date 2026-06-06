@@ -6,8 +6,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
   // Chat completions endpoint proxy (supports streaming)
   app.post('/api/chat', async (req, res) => {
@@ -59,27 +59,41 @@ async function startServer() {
 
   // Image generations endpoint proxy
   app.post('/api/image', async (req, res) => {
-    const { prompt, model, baseUrl, apiKey, image } = req.body;
+    const { prompt, model, baseUrl, apiKey, image, images } = req.body;
     
     try {
-      let url = `${baseUrl.replace(/\/$/, '')}/images/generations`;
+      const safeBaseUrl = baseUrl || 'https://api.openai.com/v1';
+      let url = `${safeBaseUrl.replace(/\/$/, '')}/images/generations`;
       let options: RequestInit;
 
       if (image && image.startsWith('data:image/')) {
-        url = `${baseUrl.replace(/\/$/, '')}/images/edits`;
+        url = `${safeBaseUrl.replace(/\/$/, '')}/images/edits`;
         
         // Use Node's built-in FormData and Blob (Node 18+)
         const formData = new FormData();
         formData.append('prompt', prompt);
         formData.append('model', model);
         if (req.body.n) formData.append('n', String(req.body.n));
+        if (req.body.size) formData.append('size', String(req.body.size));
+
+        const imgArray = images && images.length > 0 ? images : (image ? [image] : []);
         
-        // OpenAi /images/edits requires a PNG. We pass the blob and specify a filename.
-        const base64Data = image.split(',')[1];
-        const mimeType = image.split(';')[0].split(':')[1];
-        const buffer = Buffer.from(base64Data, 'base64');
-        const blob = new Blob([buffer], { type: mimeType });
-        formData.append('image', blob, mimeType === 'image/png' ? 'image.png' : 'image.jpeg');
+        for (let i = 0; i < imgArray.length; i++) {
+          const img = imgArray[i];
+          if (!img.startsWith('data:image/')) continue;
+          
+          const base64Data = img.split(',')[1];
+          const mimeType = img.split(';')[0].split(':')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          const blob = new Blob([buffer], { type: mimeType });
+          const filename = mimeType === 'image/png' ? (i === 0 ? 'image.png' : 'mask.png') : (i === 0 ? 'image.jpeg' : 'mask.jpeg');
+          
+          if (i === 0) {
+            formData.append('image', blob, filename);
+          } else if (i === 1) {
+             formData.append('mask', blob, filename);
+          }
+        }
 
         options = {
           method: 'POST',
@@ -95,6 +109,12 @@ async function startServer() {
 
         // Ensure n and size are present for standards, but let proxy override if they want
         if (!bodyPayload.n) bodyPayload.n = 1;
+        if (!bodyPayload.size) bodyPayload.size = "1024x1024";
+
+        const imgArray = images && images.length > 0 ? images : (image ? [image] : []);
+        if (imgArray.length > 0) {
+           bodyPayload.base64Array = imgArray;
+        }
 
         options = {
           method: 'POST',
@@ -119,7 +139,13 @@ async function startServer() {
         return res.status(response.status).json({ error: errStr || response.statusText });
       }
 
-      const data = await response.json();
+      const rawText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch (err) {
+        throw new Error(`API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}`);
+      }
       res.json(data);
     } catch (e: any) {
       console.error('Image API Error:', e);
@@ -156,6 +182,16 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Global Error Handler to always return JSON for API routes
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith('/api/')) {
+      console.error('API Error:', err);
+      res.status(err.status || 500).json({ error: err.message || 'Internal Server Error', details: err.stack });
+    } else {
+      next(err);
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
