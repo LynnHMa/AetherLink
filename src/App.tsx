@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy, RefreshCcw } from 'lucide-react';
+import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy, RefreshCcw, StopCircle, CopyPlus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
@@ -18,6 +18,7 @@ interface Message {
   images?: string[];
   model?: string;
   isError?: boolean;
+  isRetrying?: boolean;
 }
 
 interface ChatSession {
@@ -210,6 +211,7 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const cancelRetryIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     localStorage.setItem('llm_base_url', baseUrl);
@@ -269,10 +271,15 @@ export default function App() {
 
   const handleChatCompletion = async (userMsg: Message) => {
     const newChatHistory = [...messages, userMsg].map(m => {
+      let textContent = m.content;
+      if (m.isImage && m.imageUrl) {
+        textContent = `[Assistant generated an image]`;
+      }
+      
       if (m.images && m.images.length > 0) {
         const visionContent: any[] = [];
-        if (m.content && m.content.trim() !== '') {
-          visionContent.push({ type: 'text', text: m.content });
+        if (textContent && textContent.trim() !== '') {
+          visionContent.push({ type: 'text', text: textContent });
         } else {
           visionContent.push({ type: 'text', text: 'Please see the attached image.' });
         }
@@ -284,7 +291,7 @@ export default function App() {
           content: visionContent
         };
       }
-      return { role: m.role, content: m.content };
+      return { role: m.role, content: textContent };
     });
     const assistantId = Date.now().toString() + '-assistant';
     
@@ -349,17 +356,25 @@ export default function App() {
           }
         }
         isSuccess = true;
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, isRetrying: false } : m));
       } catch (error: any) {
-        if (!autoRetryRef.current) {
+        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId)) {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: m.content + `\n\n**Error:** ${error.message}`, isError: true } : m
+            m.id === assistantId ? { ...m, content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error:** ${error.message}`, isError: true, isRetrying: false } : m
           ));
+          cancelRetryIdsRef.current.delete(assistantId);
           break;
         } else {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `**Error:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false } : m
+            m.id === assistantId ? { ...m, content: `**Error:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false, isRetrying: true } : m
           ));
-          await new Promise(r => setTimeout(r, 2000));
+          
+          let waited = 0;
+          while (waited < 2000) {
+            if (cancelRetryIdsRef.current.has(assistantId)) break;
+            await new Promise(r => setTimeout(r, 100));
+            waited += 100;
+          }
         }
       }
     }
@@ -462,21 +477,49 @@ export default function App() {
           throw new Error(`Proxy Success (200), but missing image URL. Proxy response: ${JSON.stringify(data).slice(0, 500)}`);
         }
         isSuccess = true;
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, isRetrying: false } : m));
       } catch (error: any) {
-        if (!autoRetryRef.current) {
+        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId)) {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}`, isError: true } : m
+            m.id === assistantId ? { ...m, content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error Generating Image:** ${error.message}`, isError: true, isRetrying: false } : m
           ));
+          cancelRetryIdsRef.current.delete(assistantId);
           break;
         } else {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false } : m
+            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false, isRetrying: true } : m
           ));
-          await new Promise(r => setTimeout(r, 2000));
+          
+          let waited = 0;
+          while (waited < 2000) {
+            if (cancelRetryIdsRef.current.has(assistantId)) break;
+            await new Promise(r => setTimeout(r, 100));
+            waited += 100;
+          }
         }
       }
     }
     setIsLoading(false);
+  };
+
+  const handleStopRetry = (msgId: string) => {
+    cancelRetryIdsRef.current.add(msgId);
+  };
+
+  const reusePrompt = (msg: Message, includeImages: boolean) => {
+    setInput(msg.content);
+    if (includeImages && msg.images && msg.images.length > 0) {
+      setReferenceImages(msg.images);
+    } else {
+      setReferenceImages([]);
+    }
+    setTimeout(() => {
+      inputRef.current?.focus();
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+        inputRef.current.style.height = inputRef.current.scrollHeight + 'px';
+      }
+    }, 50);
   };
 
   const handleRetry = async (msgId: string) => {
@@ -815,7 +858,7 @@ export default function App() {
               <div 
                 key={msg.id} 
                 className={cn(
-                  "flex gap-4 max-w-3xl mx-auto",
+                  "flex gap-4 max-w-3xl mx-auto group relative",
                   msg.role === 'assistant' && "bg-white/[0.02] p-6 rounded-2xl border border-white/5 w-full"
                 )}
               >
@@ -906,7 +949,7 @@ export default function App() {
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
                           </ReactMarkdown>
-                          {msg.isError && (
+                          {msg.isError && !msg.isRetrying && (
                             <button
                               onClick={() => handleRetry(msg.id)}
                               className="self-start mt-2 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-600/30 rounded flex items-center gap-2 text-sm font-medium transition-colors outline-none"
@@ -915,8 +958,36 @@ export default function App() {
                               Retry
                             </button>
                           )}
+                          {msg.isRetrying && (
+                            <button
+                              onClick={() => handleStopRetry(msg.id)}
+                              className="self-start mt-2 px-3 py-1.5 bg-yellow-600/10 hover:bg-yellow-600/20 text-yellow-500 border border-yellow-600/30 rounded flex items-center gap-2 text-sm font-medium transition-colors outline-none"
+                            >
+                              <StopCircle className="w-4 h-4" />
+                              Stop Retry
+                            </button>
+                          )}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {msg.role === 'user' && (
+                    <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => reusePrompt(msg, false)}
+                        className="p-1.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded-md transition-colors outline-none flex items-center gap-1.5 text-xs font-medium"
+                        title={lang === 'zh' ? '复制提示词' : 'Copy prompt'}
+                      >
+                        <CopyPlus className="w-3.5 h-3.5" />
+                      </button>
+                      <button 
+                        onClick={() => reusePrompt(msg, true)}
+                        className="p-1.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded-md transition-colors outline-none flex items-center gap-1.5 text-xs font-medium"
+                        title={lang === 'zh' ? '复制提示词和图片' : 'Copy prompt and images'}
+                      >
+                        <ImageIcon className="w-3.5 h-3.5" />
+                        <CopyPlus className="w-3 h-3 -ml-1 opacity-60" />
+                      </button>
                     </div>
                   )}
                 </div>
