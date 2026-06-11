@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy, RefreshCcw, StopCircle, CopyPlus } from 'lucide-react';
+import { Settings, Send, Bot, User, Trash2, PlusCircle, Image as ImageIcon, MessageSquare, Menu, X, Globe, Download, Copy, RefreshCcw, StopCircle, CopyPlus, Pencil, Search } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
@@ -68,6 +68,38 @@ const i18n = {
     add: '添加',
     autoRetryError: '自动重试出错请求',
     autoRetryDesc: '如遇到错误则继续自动重试',
+    sendShortcutLabel: '发送快捷键 (组合键)',
+    newlineShortcutLabel: '换行快捷键 (组合键)',
+    themeStyle: '主题配色',
+    customPrimaryColor: '自定义主色',
+    customGradientColor: '自定义渐变色',
+    customBgMain: '自定义应用背景',
+    customBgSidebar: '自定义边栏/卡片背景',
+    customTextMain: '自定义主要文本颜色',
+    appNameSetting: '应用名称',
+    appIconSetting: '应用图标',
+    importData: '导入聊天记录 (单/多条)',
+    exportData: '导出所有聊天',
+    exportSingleChat: '导出当前聊天',
+    importSuccess: '导入完成',
+    importError: '导入失败，请检查文件格式',
+    searchHistory: '搜索聊天记录...',
+    renameSession: '重命名对话',
+    themeModeLabel: '主题模式',
+    themeLight: '白天',
+    themeDark: '黑夜',
+    themeGradient: '启用渐变背景',
+    tabApi: '模型配置',
+    tabGeneral: '通用设置',
+    tabAppearance: '外观设置',
+    tabData: '数据管理',
+    exportSettings: '导出设置配置',
+    importSettings: '导入设置配置',
+    modifierNone: '无 (仅 Enter)',
+    modifierCtrl: 'Ctrl / Cmd',
+    modifierShift: 'Shift',
+    modifierAlt: 'Alt',
+    langLabel: '界面语言'
   },
   en: {
     newChat: 'New Chat',
@@ -80,7 +112,7 @@ const i18n = {
     helloSub: 'Configure your API Key and Base URL on the left. Then you can chat with me or generate images.',
     userRequest: 'User Request',
     assistantResponse: 'Assistant Response',
-    sendPlaceholderText: 'Send a message (Shift+Enter for new line)...',
+    sendPlaceholderText: 'Send a message...',
     sendPlaceholderImage: 'Enter image prompt...',
     chat: 'Chat',
     image: 'Image',
@@ -108,7 +140,48 @@ const i18n = {
     add: 'Add',
     autoRetryError: 'Auto-retry on Error',
     autoRetryDesc: 'Keep retrying automatically if error occurs',
+    sendShortcutLabel: 'Send Shortcut (Modifier + Enter)',
+    newlineShortcutLabel: 'Newline Shortcut (Modifier + Enter)',
+    themeStyle: 'Theme Color',
+    customPrimaryColor: 'Custom Primary Color',
+    customGradientColor: 'Custom Gradient Color',
+    customBgMain: 'Custom App Background Color',
+    customBgSidebar: 'Custom Sidebar/Card Background',
+    customTextMain: 'Custom Main Text Color',
+    appNameSetting: 'App Name',
+    appIconSetting: 'App Icon',
+    importData: 'Import chat(s)',
+    exportData: 'Export all chats',
+    exportSingleChat: 'Export current chat',
+    importSuccess: 'Import successful',
+    importError: 'Failed to import, please check file format',
+    searchHistory: 'Search chat history...',
+    renameSession: 'Rename Chat',
+    themeModeLabel: 'Theme Mode',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    themeGradient: 'Enable Gradient Background',
+    tabApi: 'Models & API',
+    tabGeneral: 'General',
+    tabAppearance: 'Appearance',
+    tabData: 'Data',
+    exportSettings: 'Export Settings',
+    importSettings: 'Import Settings',
+    modifierNone: 'None (Enter only)',
+    modifierCtrl: 'Ctrl / Cmd',
+    modifierShift: 'Shift',
+    modifierAlt: 'Alt',
+    langLabel: 'Language'
   }
+};
+
+const THEME_COLORS: Record<string, { bg: string, text: string, border: string, bgOp: string, shadow: string, focus: string }> = {
+  blue: { bg: 'bg-blue-600', text: 'text-blue-500', border: 'border-blue-500', bgOp: 'bg-blue-600/10', shadow: 'shadow-blue-900/20', focus: 'focus:border-blue-500/50 focus:ring-blue-500/50' },
+  purple: { bg: 'bg-purple-600', text: 'text-purple-500', border: 'border-purple-500', bgOp: 'bg-purple-600/10', shadow: 'shadow-purple-900/20', focus: 'focus:border-purple-500/50 focus:ring-purple-500/50' },
+  emerald: { bg: 'bg-emerald-600', text: 'text-emerald-500', border: 'border-emerald-500', bgOp: 'bg-emerald-600/10', shadow: 'shadow-emerald-900/20', focus: 'focus:border-emerald-500/50 focus:ring-emerald-500/50' },
+  rose: { bg: 'bg-rose-600', text: 'text-rose-500', border: 'border-rose-500', bgOp: 'bg-rose-600/10', shadow: 'shadow-rose-900/20', focus: 'focus:border-rose-500/50 focus:ring-rose-500/50' },
+  slate: { bg: 'bg-slate-600', text: 'text-slate-400', border: 'border-slate-500', bgOp: 'bg-slate-600/10', shadow: 'shadow-slate-900/20', focus: 'focus:border-slate-500/50 focus:ring-slate-500/50' },
+  custom: { bg: 'theme-custom-bg', text: 'theme-custom-text', border: 'theme-custom-border', bgOp: 'theme-custom-bg-op', shadow: 'theme-custom-shadow', focus: 'theme-custom-focus' }
 };
 
 export default function App() {
@@ -135,6 +208,36 @@ export default function App() {
   const [mode, setMode] = useState<'text' | 'image'>(() => (localStorage.getItem('llm_mode') as 'text' | 'image') || 'text');
   const [lang, setLang] = useState<'zh' | 'en'>(() => (localStorage.getItem('llm_lang') as 'zh' | 'en') || 'zh');
   const [autoRetry, setAutoRetry] = useState<boolean>(() => localStorage.getItem('llm_auto_retry') === 'true');
+  const [sendModifier, setSendModifier] = useState<'None' | 'Ctrl' | 'Shift' | 'Alt'>(() => (localStorage.getItem('llm_send_modifier') as any) || 'None');
+  const [newlineModifier, setNewlineModifier] = useState<'None' | 'Ctrl' | 'Shift' | 'Alt'>(() => (localStorage.getItem('llm_newline_modifier') as any) || 'Shift');
+  const [appName, setAppName] = useState(() => localStorage.getItem('llm_app_name') || 'AetherLink');
+  const [appIcon, setAppIcon] = useState(() => localStorage.getItem('llm_app_icon') || 'A');
+  const [themeColor, setThemeColor] = useState(() => localStorage.getItem('llm_theme_color') || 'blue');
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => (localStorage.getItem('llm_theme_mode') as 'dark' | 'light') || 'dark');
+  const [themeGradient, setThemeGradient] = useState<boolean>(() => localStorage.getItem('llm_theme_gradient') === 'true');
+  const [customPrimaryColor, setCustomPrimaryColor] = useState(() => localStorage.getItem('llm_custom_primary') || '#3b82f6');
+  const [customGradientColorDark, setCustomGradientColorDark] = useState(() => localStorage.getItem('llm_custom_gradient_dark') || localStorage.getItem('llm_custom_gradient') || '#1e3a8a');
+  const [customGradientColorLight, setCustomGradientColorLight] = useState(() => localStorage.getItem('llm_custom_gradient_light') || '#dbeafe');
+  const [customBgMainDark, setCustomBgMainDark] = useState(() => localStorage.getItem('llm_custom_bg_main_dark') || localStorage.getItem('llm_custom_bg_main') || '#0d0d0d');
+  const [customBgMainLight, setCustomBgMainLight] = useState(() => localStorage.getItem('llm_custom_bg_main_light') || '#f9fafb');
+  const [customBgSidebarDark, setCustomBgSidebarDark] = useState(() => localStorage.getItem('llm_custom_bg_sidebar_dark') || localStorage.getItem('llm_custom_bg_sidebar') || '#141414');
+  const [customBgSidebarLight, setCustomBgSidebarLight] = useState(() => localStorage.getItem('llm_custom_bg_sidebar_light') || '#ffffff');
+  const [customTextMainDark, setCustomTextMainDark] = useState(() => localStorage.getItem('llm_custom_text_main_dark') || localStorage.getItem('llm_custom_text_main') || '#f3f4f6');
+  const [customTextMainLight, setCustomTextMainLight] = useState(() => localStorage.getItem('llm_custom_text_main_light') || '#111827');
+
+  const activeCustomGradientColor = themeMode === 'light' ? customGradientColorLight : customGradientColorDark;
+  const activeCustomBgMain = themeMode === 'light' ? customBgMainLight : customBgMainDark;
+  const activeCustomBgSidebar = themeMode === 'light' ? customBgSidebarLight : customBgSidebarDark;
+  const activeCustomTextMain = themeMode === 'light' ? customTextMainLight : customTextMainDark;
+
+  const setCustomGradientColor = (v: string) => themeMode === 'light' ? setCustomGradientColorLight(v) : setCustomGradientColorDark(v);
+  const setCustomBgMain = (v: string) => themeMode === 'light' ? setCustomBgMainLight(v) : setCustomBgMainDark(v);
+  const setCustomBgSidebar = (v: string) => themeMode === 'light' ? setCustomBgSidebarLight(v) : setCustomBgSidebarDark(v);
+  const setCustomTextMain = (v: string) => themeMode === 'light' ? setCustomTextMainLight(v) : setCustomTextMainDark(v);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'api' | 'general' | 'appearance' | 'data'>('api');
 
   const autoRetryRef = useRef(autoRetry);
   useEffect(() => {
@@ -142,6 +245,14 @@ export default function App() {
   }, [autoRetry]);
 
   const t = i18n[lang];
+
+  const filteredSessions = sessions.filter(s => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    if ((s.title || t.newChat).toLowerCase().includes(query)) return true;
+    if (s.messages && s.messages.some(m => String(m.content || '').toLowerCase().includes(query))) return true;
+    return false;
+  });
 
   useEffect(() => {
     if (sessions.length === 0) {
@@ -223,7 +334,23 @@ export default function App() {
     localStorage.setItem('llm_image_models', JSON.stringify(imageModels));
     localStorage.setItem('llm_lang', lang);
     localStorage.setItem('llm_auto_retry', autoRetry.toString());
-  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry]);
+    localStorage.setItem('llm_send_modifier', sendModifier);
+    localStorage.setItem('llm_newline_modifier', newlineModifier);
+    localStorage.setItem('llm_app_name', appName);
+    localStorage.setItem('llm_app_icon', appIcon);
+    localStorage.setItem('llm_theme_color', themeColor);
+    localStorage.setItem('llm_theme_mode', themeMode);
+    localStorage.setItem('llm_theme_gradient', themeGradient.toString());
+    localStorage.setItem('llm_custom_primary', customPrimaryColor);
+    localStorage.setItem('llm_custom_gradient_dark', customGradientColorDark);
+    localStorage.setItem('llm_custom_gradient_light', customGradientColorLight);
+    localStorage.setItem('llm_custom_bg_main_dark', customBgMainDark);
+    localStorage.setItem('llm_custom_bg_main_light', customBgMainLight);
+    localStorage.setItem('llm_custom_bg_sidebar_dark', customBgSidebarDark);
+    localStorage.setItem('llm_custom_bg_sidebar_light', customBgSidebarLight);
+    localStorage.setItem('llm_custom_text_main_dark', customTextMainDark);
+    localStorage.setItem('llm_custom_text_main_light', customTextMainLight);
+  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry, sendModifier, newlineModifier, appName, appIcon, themeColor, themeMode, themeGradient, customPrimaryColor, customGradientColorDark, customGradientColorLight, customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, customTextMainDark, customTextMainLight]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -544,10 +671,26 @@ export default function App() {
     }, 100);
   };
 
+  const isModifierPressed = (mod: string, e: React.KeyboardEvent) => {
+    if (mod === 'None') return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
+    if (mod === 'Ctrl') return e.ctrlKey || e.metaKey;
+    if (mod === 'Shift') return e.shiftKey;
+    if (mod === 'Alt') return e.altKey;
+    return false;
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
+    if (e.key === 'Enter') {
+      const isSend = isModifierPressed(sendModifier, e);
+      const isNewline = isModifierPressed(newlineModifier, e);
+      
+      if (isSend) {
+        e.preventDefault();
+        handleSubmit();
+      } else if (!isNewline) {
+        // If it's neither send nor exact newline combo, default behaviour is usually new line, but standard behavior dictates avoiding sending.
+        // We do not prevent default unless it matches Send.
+      }
     }
   };
 
@@ -691,8 +834,49 @@ export default function App() {
     }
   };
 
+  const hexToRgba = (hex: string, alpha: number) => {
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 4) {
+      r = parseInt(hex[1] + hex[1], 16);
+      g = parseInt(hex[2] + hex[2], 16);
+      b = parseInt(hex[3] + hex[3], 16);
+    } else if (hex.length === 7) {
+      r = parseInt(hex.substring(1, 3), 16);
+      g = parseInt(hex.substring(3, 5), 16);
+      b = parseInt(hex.substring(5, 7), 16);
+    }
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  const customThemeStyles = themeColor === 'custom' ? {
+    '--color-primary': customPrimaryColor,
+    '--color-primary-text': customPrimaryColor,
+    '--color-primary-bg': hexToRgba(customPrimaryColor, 0.1),
+    '--color-primary-border': hexToRgba(customPrimaryColor, 0.5),
+    '--color-primary-hover': customPrimaryColor, // can do better, but custom is custom
+    '--color-primary-shadow': hexToRgba(customPrimaryColor, 0.2),
+    '--theme-gradient-start': activeCustomGradientColor,
+    '--theme-bg-main': activeCustomBgMain,
+    '--theme-bg-sidebar': activeCustomBgSidebar,
+    '--theme-text-main': activeCustomTextMain,
+    '--theme-gradient-end': activeCustomBgMain,
+  } as React.CSSProperties : {};
+
   return (
-    <div className="flex h-screen bg-[#0d0d0d] text-gray-100 overflow-hidden font-sans">
+    <div 
+      className="flex h-screen bg-[#0d0d0d] text-gray-100 overflow-hidden font-sans relative z-0" 
+      data-theme={themeMode}
+      data-custom-theme={themeColor === 'custom'}
+      style={customThemeStyles}
+    >
+      {/* Background Gradient Layer */}
+      <div 
+        className={cn(
+          "absolute inset-0 z-[-1] transition-opacity duration-500",
+          themeGradient ? "opacity-100" : "opacity-0"
+        )}
+        data-gradient="true"
+      />
       
       {/* Global Confirm Modal for Clearing Chat */}
       {isClearingChat && (
@@ -735,8 +919,10 @@ export default function App() {
       )}>
         <div className="p-6 flex items-center justify-between font-medium text-lg mb-2">
           <span className="flex items-center gap-3">
-             <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-white shadow-lg shadow-blue-900/20">A</div>
-             <span className="text-lg font-semibold tracking-tight">AetherLink</span>
+             <div className={cn("w-8 h-8 rounded flex items-center justify-center font-bold shadow-lg", THEME_COLORS[themeColor]?.shadow, THEME_COLORS[themeColor]?.bg)}>
+              <span style={{ color: '#ffffff' }}>{appIcon}</span>
+            </div>
+             <span className="text-lg font-semibold tracking-tight">{appName}</span>
           </span>
           <button 
             className="md:hidden p-1 hover:bg-white/5 rounded"
@@ -756,54 +942,173 @@ export default function App() {
           </button>
           
           <div className="space-y-1">
-            <div className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3 px-2">{t.history}</div>
-            {sessions.length === 0 ? (
+            <div className="flex items-center gap-2 mb-3 px-2">
+              <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">{t.history}</span>
+            </div>
+            
+            <div className="px-2 mb-3 relative">
+              <input
+                type="text"
+                placeholder={t.searchHistory}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 outline-none focus:border-white/20 transition-all"
+              />
+              <Search className="w-3.5 h-3.5 text-gray-500 absolute left-4 top-2" />
+            </div>
+
+            {filteredSessions.length === 0 ? (
               <div className="px-2 py-3 text-sm text-gray-500">
                 {t.noHistory}
               </div>
             ) : (
-              sessions.map(s => (
-                <button 
+              filteredSessions.map(s => (
+                <div 
                   key={s.id}
                   onClick={() => {
-                    setCurrentSessionId(s.id);
-                    if (window.innerWidth < 768) setIsSidebarOpen(false);
+                    if (editingSessionId !== s.id) {
+                      setCurrentSessionId(s.id);
+                      if (window.innerWidth < 768) setIsSidebarOpen(false);
+                    }
                   }}
                   className={cn(
-                    "w-full group flex items-center justify-between p-2 rounded-lg text-left transition-colors",
-                    s.id === currentSessionId ? "bg-blue-600/10 text-blue-400" : "hover:bg-white/5 text-gray-400"
+                    "w-full group flex items-center justify-between p-2 rounded-lg text-left transition-colors cursor-pointer",
+                    s.id === currentSessionId ? `${THEME_COLORS[themeColor]?.bgOp} ${THEME_COLORS[themeColor]?.text}` : "hover:bg-white/5 text-gray-400"
                   )}
                 >
-                  <span className="text-sm truncate flex items-center gap-2 flex-1 min-w-0 pr-2">
+                  <span className="text-sm flex items-center gap-2 flex-1 min-w-0 pr-2">
                     <MessageSquare className="w-4 h-4 shrink-0" /> 
-                    <span className="truncate">{s.title || t.newChat}</span>
+                    {editingSessionId === s.id ? (
+                      <input 
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onBlur={() => {
+                          setSessions(prev => prev.map(sess => sess.id === s.id ? { ...sess, title: editingTitle || t.newChat } : sess));
+                          setEditingSessionId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setSessions(prev => prev.map(sess => sess.id === s.id ? { ...sess, title: editingTitle || t.newChat } : sess));
+                            setEditingSessionId(null);
+                          }
+                          if (e.key === 'Escape') setEditingSessionId(null);
+                        }}
+                        className="flex-1 min-w-0 bg-black/50 border border-white/10 rounded px-1.5 py-0.5 text-sm text-white outline-none"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="truncate">{s.title || t.newChat}</span>
+                    )}
                   </span>
-                  {s.id === currentSessionId && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></div>}
-                  {s.id !== currentSessionId && (
-                    <div 
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         setSessions(prev => prev.filter(sess => sess.id !== s.id));
-                       }}
-                       className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"
-                    >
-                      <Trash2 className="w-3 h-3 cursor-pointer" />
+                  
+                  {s.id === currentSessionId && editingSessionId !== s.id && <div className={cn("w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden", THEME_COLORS[themeColor]?.bg)}></div>}
+                  
+                  {editingSessionId !== s.id && (
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center transition-opacity shrink-0">
+                      <div 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           const dataStr = JSON.stringify(s, null, 2);
+                           const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                           const exportFileDefaultName = `chat_${s.id}_${new Date().toISOString().slice(0,10)}.json`;
+                           const linkElement = document.createElement('a');
+                           linkElement.setAttribute('href', dataUri);
+                           linkElement.setAttribute('download', exportFileDefaultName);
+                           linkElement.click();
+                         }}
+                         className="p-1 hover:text-white transition-opacity"
+                         title={t.exportSingleChat}
+                      >
+                        <Download className="w-3 h-3 cursor-pointer" />
+                      </div>
+                      <div 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           setEditingSessionId(s.id);
+                           setEditingTitle(s.title || t.newChat);
+                         }}
+                         className="p-1 hover:text-white transition-opacity"
+                      >
+                        <Pencil className="w-3 h-3 cursor-pointer" />
+                      </div>
+                      <div 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           setSessions(prev => prev.filter(sess => sess.id !== s.id));
+                         }}
+                         className="p-1 hover:text-red-400 transition-opacity"
+                      >
+                        <Trash2 className="w-3 h-3 cursor-pointer" />
+                      </div>
                     </div>
                   )}
-                </button>
+                </div>
               ))
             )}
           </div>
         </div>
 
         <div className="mt-auto p-4 border-t border-white/5 space-y-2">
-          <button 
-            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-sm transition-colors text-gray-400 hover:text-white text-left"
-          >
-            <Globe className="w-4 h-4" />
-            {t.langSwitch}
-          </button>
+          <div className="flex gap-2">
+            <label 
+              title={t.importData}
+              className="flex-1 flex justify-center bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white p-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+            >
+              <input 
+                type="file" 
+                accept=".json" 
+                className="hidden" 
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    try {
+                      const data = JSON.parse(e.target?.result as string);
+                      if (Array.isArray(data)) {
+                        setSessions(data);
+                        if (data.length > 0) setCurrentSessionId(data[0].id);
+                        localStorage.setItem('llm_sessions', JSON.stringify(data));
+                        alert(t.importSuccess);
+                      } else if (data && typeof data === 'object' && data.id && Array.isArray(data.messages)) {
+                        // Single chat import
+                        setSessions(prev => {
+                          const exists = prev.find(s => s.id === data.id);
+                          const newSess = exists ? prev.map(s => s.id === data.id ? data : s) : [data, ...prev];
+                          localStorage.setItem('llm_sessions', JSON.stringify(newSess));
+                          return newSess;
+                        });
+                        setCurrentSessionId(data.id);
+                        alert(t.importSuccess);
+                      } else {
+                        throw new Error('Invalid format');
+                      }
+                    } catch (err) {
+                      alert(t.importError);
+                    }
+                  };
+                  reader.readAsText(file);
+                  e.target.value = '';
+                }} 
+              />
+              {t.importData}
+            </label>
+            <button
+              onClick={() => {
+                const dataStr = JSON.stringify(sessions, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                const exportFileDefaultName = `chat_history_${new Date().toISOString().slice(0,10)}.json`;
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+              }}
+              className="flex-1 flex justify-center bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white p-2 rounded-lg text-xs font-medium transition-colors"
+            >
+              {t.exportData}
+            </button>
+          </div>
           <button 
             onClick={() => setIsSettingsOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 text-sm transition-colors text-gray-400 hover:text-white text-left"
@@ -825,7 +1130,7 @@ export default function App() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="text-xs font-bold text-blue-500 bg-blue-500/10 px-2 py-1 rounded tracking-widest uppercase">
+            <span className={cn("text-xs font-bold px-2 py-1 rounded tracking-widest uppercase", THEME_COLORS[themeColor]?.text, THEME_COLORS[themeColor]?.bgOp)}>
               {mode === 'text' ? chatModel : imageModel}
             </span>
             <span className="text-xs text-gray-500 hidden sm:inline-block">
@@ -843,8 +1148,8 @@ export default function App() {
           <div className="max-w-4xl mx-auto w-full p-4 md:p-8">
             {messages.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
-              <div className="w-16 h-16 bg-blue-600/10 flex items-center justify-center rounded-2xl mb-4 border border-blue-500/20">
-                <Bot className="w-8 h-8 text-blue-500" />
+              <div className={cn("w-16 h-16 flex items-center justify-center rounded-2xl mb-4 border", THEME_COLORS[themeColor]?.bgOp, THEME_COLORS[themeColor]?.border, "border-opacity-20")}>
+                <Bot className={cn("w-8 h-8", THEME_COLORS[themeColor]?.text)} />
               </div>
               <h2 className="text-2xl font-semibold mb-2 text-gray-100">{t.hello}</h2>
               <p className="text-gray-400 max-w-md text-sm leading-relaxed text-balance">
@@ -865,16 +1170,16 @@ export default function App() {
                 {/* Avatar */}
                 <div className={cn(
                   "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-                  msg.role === 'user' ? "bg-indigo-900 text-white" : "bg-blue-600 text-white"
+                  msg.role === 'user' ? "bg-indigo-900" : THEME_COLORS[themeColor]?.bg
                 )}>
-                  {msg.role === 'user' ? 'ME' : 'AI'}
+                  <span style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>{msg.role === 'user' ? 'ME' : 'AI'}</span>
                 </div>
 
                 {/* Bubble Content */}
                 <div className="space-y-2 flex-1 w-full overflow-hidden">
                   <div className={cn(
                     "text-xs font-bold uppercase tracking-tighter",
-                    msg.role === 'user' ? "text-gray-500" : "text-blue-400"
+                    msg.role === 'user' ? "text-gray-500" : THEME_COLORS[themeColor]?.text
                   )}>
                     {msg.role === 'user' ? t.userRequest : (msg.model || t.assistantResponse)}
                   </div>
@@ -1031,7 +1336,7 @@ export default function App() {
                 ref={inputRef}
                 rows={1}
                 className="w-full max-h-48 bg-transparent border-none outline-none resize-none hide-scrollbar text-sm text-white placeholder-gray-500 px-4 pt-2"
-                placeholder={mode === 'text' ? t.sendPlaceholderText : t.sendPlaceholderImage}
+                placeholder={mode === 'text' ? `${t.sendPlaceholderText}` : t.sendPlaceholderImage}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -1098,239 +1403,571 @@ export default function App() {
               </button>
             </div>
             
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto w-full overflow-x-hidden">
+            <div className="flex border-b border-white/5 bg-[#141414]">
+              {(['api', 'general', 'appearance', 'data'] as const).map(tab => (
+                <button
+                  key={tab}
+                  className={cn(
+                    "flex-1 py-3 text-[11px] font-bold uppercase tracking-widest transition-colors",
+                    activeSettingsTab === tab ? "text-white border-b-2 border-blue-500" : "text-gray-500 hover:text-gray-300"
+                  )}
+                  onClick={() => setActiveSettingsTab(tab)}
+                >
+                  {tab === 'api' ? t.tabApi : tab === 'general' ? t.tabGeneral : tab === 'appearance' ? t.tabAppearance : t.tabData}
+                </button>
+              ))}
+            </div>
+            
+            <div className="p-5 space-y-4 h-[60vh] overflow-y-auto w-full overflow-x-hidden">
               {settingsError && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg">
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg mb-4">
                   {settingsError}
                 </div>
               )}
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  {t.baseUrl}
-                </label>
-                <input 
-                  type="text" 
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white placeholder-gray-600"
-                  placeholder=""
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  {t.apiKey}
-                </label>
-                <input 
-                  type="password" 
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white placeholder-gray-600"
-                  placeholder="sk-..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  {t.textModel}
-                </label>
-                {addingModelType === 'text' ? (
-                  <div className="flex gap-2">
+              
+              {activeSettingsTab === 'api' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                      {t.baseUrl}
+                    </label>
                     <input 
-                      autoFocus
                       type="text" 
-                      value={newModelName}
-                      onChange={e => setNewModelName(e.target.value)}
-                      placeholder={t.enterNewChatModel}
-                      className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && newModelName.trim()) {
-                          if (!chatModels.includes(newModelName.trim())) {
-                            setChatModels([...chatModels, newModelName.trim()]);
-                            setChatModel(newModelName.trim());
-                          }
-                          setAddingModelType(null);
-                          setNewModelName('');
-                        } else if (e.key === 'Escape') {
-                          setAddingModelType(null);
-                          setNewModelName('');
-                        }
-                      }}
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white placeholder-gray-600"
                     />
-                    <button 
-                      onClick={() => {
-                        if (newModelName.trim() && !chatModels.includes(newModelName.trim())) {
-                          setChatModels([...chatModels, newModelName.trim()]);
-                          setChatModel(newModelName.trim());
-                        }
-                        setAddingModelType(null);
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
-                    >
-                      {t.add}
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setAddingModelType(null);
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
-                    >
-                      {t.cancel}
-                    </button>
                   </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <select 
-                      value={chatModel}
-                      onChange={(e) => setChatModel(e.target.value)}
-                      className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
-                    >
-                      {chatModels.map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                    <button 
-                      onClick={() => {
-                        setAddingModelType('text');
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
-                      title={t.addModel}
-                    >
-                      <PlusCircle className="w-4 h-4 text-gray-400" />
-                    </button>
-                    <button 
-                      onClick={() => {
-                        if (chatModels.length <= 1) {
-                           setSettingsError(t.atLeastOneModel);
-                           return;
-                        }
-                        const newList = chatModels.filter(m => m !== chatModel);
-                        setChatModels(newList);
-                        setChatModel(newList[0]);
-                      }}
-                      className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
-                      title={t.deleteModel}
-                    >
-                      <Trash2 className="w-4 h-4 text-red-500/60" />
-                    </button>
-                  </div>
-                )}
-              </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
-                  {t.imageModel}
-                </label>
-                {addingModelType === 'image' ? (
-                  <div className="flex gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                      {t.apiKey}
+                    </label>
                     <input 
-                      autoFocus
-                      type="text" 
-                      value={newModelName}
-                      onChange={e => setNewModelName(e.target.value)}
-                      placeholder={t.enterNewImageModel}
-                      className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && newModelName.trim()) {
-                          if (!imageModels.includes(newModelName.trim())) {
-                            setImageModels([...imageModels, newModelName.trim()]);
-                            setImageModel(newModelName.trim());
-                          }
-                          setAddingModelType(null);
-                          setNewModelName('');
-                        } else if (e.key === 'Escape') {
-                          setAddingModelType(null);
-                          setNewModelName('');
-                        }
-                      }}
+                      type="password" 
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 rounded-lg outline-none transition-all text-sm font-mono text-white placeholder-gray-600"
+                      placeholder="sk-..."
                     />
-                    <button 
-                      onClick={() => {
-                        if (newModelName.trim() && !imageModels.includes(newModelName.trim())) {
-                          setImageModels([...imageModels, newModelName.trim()]);
-                          setImageModel(newModelName.trim());
-                        }
-                        setAddingModelType(null);
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
-                    >
-                      {t.add}
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setAddingModelType(null);
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
-                    >
-                      {t.cancel}
-                    </button>
                   </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <select 
-                      value={imageModel}
-                      onChange={(e) => setImageModel(e.target.value)}
-                      className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
-                    >
-                      {imageModels.map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                    <button 
-                      onClick={() => {
-                        setAddingModelType('image');
-                        setNewModelName('');
-                      }}
-                      className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
-                      title={t.addModel}
-                    >
-                      <PlusCircle className="w-4 h-4 text-gray-400" />
-                    </button>
-                    <button 
-                      onClick={() => {
-                        if (imageModels.length <= 1) {
-                           setSettingsError(t.atLeastOneModel);
-                           return;
-                        }
-                        const newList = imageModels.filter(m => m !== imageModel);
-                        setImageModels(newList);
-                        setImageModel(newList[0]);
-                      }}
-                      className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
-                      title={t.deleteModel}
-                    >
-                      <Trash2 className="w-4 h-4 text-red-500/60" />
-                    </button>
-                  </div>
-                )}
-              </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <div>
-                  <div className="text-sm font-medium text-white">{t.autoRetryError}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{t.autoRetryDesc}</div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                      {t.textModel}
+                    </label>
+                    {addingModelType === 'text' ? (
+                      <div className="flex gap-2">
+                        <input 
+                          autoFocus
+                          type="text" 
+                          value={newModelName}
+                          onChange={e => setNewModelName(e.target.value)}
+                          placeholder={t.enterNewChatModel}
+                          className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && newModelName.trim()) {
+                              if (!chatModels.includes(newModelName.trim())) {
+                                setChatModels([...chatModels, newModelName.trim()]);
+                                setChatModel(newModelName.trim());
+                              }
+                              setAddingModelType(null);
+                              setNewModelName('');
+                            } else if (e.key === 'Escape') {
+                              setAddingModelType(null);
+                              setNewModelName('');
+                            }
+                          }}
+                        />
+                        <button 
+                          onClick={() => {
+                            if (newModelName.trim() && !chatModels.includes(newModelName.trim())) {
+                              setChatModels([...chatModels, newModelName.trim()]);
+                              setChatModel(newModelName.trim());
+                            }
+                            setAddingModelType(null);
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
+                        >
+                          {t.add}
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setAddingModelType(null);
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {t.cancel}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <select 
+                          value={chatModel}
+                          onChange={(e) => setChatModel(e.target.value)}
+                          className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
+                        >
+                          {chatModels.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                        </select>
+                        <button 
+                          onClick={() => {
+                            setAddingModelType('text');
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
+                          title={t.addModel}
+                        >
+                          <PlusCircle className="w-4 h-4 text-gray-400" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (chatModels.length <= 1) {
+                               setSettingsError(t.atLeastOneModel);
+                               return;
+                            }
+                            const newList = chatModels.filter(m => m !== chatModel);
+                            setChatModels(newList);
+                            setChatModel(newList[0]);
+                          }}
+                          className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
+                          title={t.deleteModel}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500/60" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                      {t.imageModel}
+                    </label>
+                    {addingModelType === 'image' ? (
+                      <div className="flex gap-2">
+                        <input 
+                          autoFocus
+                          type="text" 
+                          value={newModelName}
+                          onChange={e => setNewModelName(e.target.value)}
+                          placeholder={t.enterNewImageModel}
+                          className="flex-1 px-3 py-2 bg-black border border-blue-500/50 rounded-lg outline-none text-sm font-mono text-white placeholder-gray-600"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && newModelName.trim()) {
+                              if (!imageModels.includes(newModelName.trim())) {
+                                setImageModels([...imageModels, newModelName.trim()]);
+                                setImageModel(newModelName.trim());
+                              }
+                              setAddingModelType(null);
+                              setNewModelName('');
+                            } else if (e.key === 'Escape') {
+                              setAddingModelType(null);
+                              setNewModelName('');
+                            }
+                          }}
+                        />
+                        <button 
+                          onClick={() => {
+                            if (newModelName.trim() && !imageModels.includes(newModelName.trim())) {
+                              setImageModels([...imageModels, newModelName.trim()]);
+                              setImageModel(newModelName.trim());
+                            }
+                            setAddingModelType(null);
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors"
+                        >
+                          {t.add}
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setAddingModelType(null);
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {t.cancel}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <select 
+                          value={imageModel}
+                          onChange={(e) => setImageModel(e.target.value)}
+                          className="flex-1 px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white min-w-0"
+                        >
+                          {imageModels.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                        </select>
+                        <button 
+                          onClick={() => {
+                            setAddingModelType('image');
+                            setNewModelName('');
+                          }}
+                          className="px-3 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors flex items-center justify-center shrink-0"
+                          title={t.addModel}
+                        >
+                          <PlusCircle className="w-4 h-4 text-gray-400" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (imageModels.length <= 1) {
+                               setSettingsError(t.atLeastOneModel);
+                               return;
+                            }
+                            const newList = imageModels.filter(m => m !== imageModel);
+                            setImageModels(newList);
+                            setImageModel(newList[0]);
+                          }}
+                          className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-red-500 transition-colors flex items-center justify-center shrink-0"
+                          title={t.deleteModel}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500/60" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setAutoRetry(!autoRetry)}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${autoRetry ? 'bg-blue-600' : 'bg-gray-700'}`}
-                >
-                  <div className={`absolute top-1 max-w-full bottom-1 w-4 h-4 rounded-full bg-white transition-transform ${autoRetry ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
-              </div>
+              )}
+
+              {activeSettingsTab === 'general' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-white">{t.autoRetryError}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{t.autoRetryDesc}</div>
+                    </div>
+                    <button
+                      onClick={() => setAutoRetry(!autoRetry)}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${autoRetry ? 'bg-blue-600' : 'bg-gray-700'}`}
+                    >
+                      <div className={`absolute top-1 max-w-full bottom-1 w-4 h-4 rounded-full bg-white transition-transform ${autoRetry ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex gap-4 w-full">
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                        {t.sendShortcutLabel}
+                      </label>
+                      <select
+                        value={sendModifier}
+                        onChange={(e) => {
+                          const val = e.target.value as any;
+                          setSendModifier(val);
+                          if (val === newlineModifier) setNewlineModifier(val === 'None' ? 'Shift' : 'None');
+                        }}
+                        className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                      >
+                        <option value="None">{t.modifierNone}</option>
+                        <option value="Ctrl">{t.modifierCtrl}</option>
+                        <option value="Shift">{t.modifierShift}</option>
+                        <option value="Alt">{t.modifierAlt}</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                        {t.newlineShortcutLabel}
+                      </label>
+                      <select
+                        value={newlineModifier}
+                        onChange={(e) => {
+                          const val = e.target.value as any;
+                          setNewlineModifier(val);
+                          if (val === sendModifier) setSendModifier(val === 'None' ? 'Shift' : 'None');
+                        }}
+                        className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                      >
+                        <option value="None">{t.modifierNone}</option>
+                        <option value="Ctrl">{t.modifierCtrl}</option>
+                        <option value="Shift">{t.modifierShift}</option>
+                        <option value="Alt">{t.modifierAlt}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                      {t.langLabel}
+                    </label>
+                    <select
+                      value={lang}
+                      onChange={(e) => setLang(e.target.value as any)}
+                      className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                    >
+                      <option value="zh">简体中文</option>
+                      <option value="en">English</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {activeSettingsTab === 'appearance' && (
+                <div className="space-y-4">
+                  <div className="flex gap-4 w-full">
+                    <div className="w-20">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                        {t.appIconSetting}
+                      </label>
+                      <input
+                        type="text"
+                        value={appIcon}
+                        onChange={(e) => setAppIcon(e.target.value)}
+                        maxLength={2}
+                        className="w-full px-3 py-2 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white text-center"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                        {t.appNameSetting}
+                      </label>
+                      <input
+                        type="text"
+                        value={appName}
+                        onChange={(e) => setAppName(e.target.value)}
+                        className="w-full px-3 py-2 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-4 w-full">
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                        {t.themeModeLabel}
+                      </label>
+                      <select
+                        value={themeMode}
+                        onChange={(e) => setThemeMode(e.target.value as any)}
+                        className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                      >
+                        <option value="dark">{t.themeDark}</option>
+                        <option value="light">{t.themeLight}</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                        {t.themeStyle}
+                      </label>
+                      <select
+                        value={themeColor}
+                        onChange={(e) => setThemeColor(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded-lg outline-none transition-all text-sm font-mono text-white"
+                      >
+                        <option value="blue">Blue</option>
+                        <option value="purple">Purple</option>
+                        <option value="emerald">Emerald</option>
+                        <option value="rose">Rose</option>
+                        <option value="slate">Slate</option>
+                        <option value="custom">Custom (Highly Configurable)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="text-sm font-medium text-white">{t.themeGradient}</div>
+                    <button
+                      onClick={() => setThemeGradient(!themeGradient)}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${themeGradient ? 'bg-blue-600' : 'bg-gray-700'}`}
+                    >
+                      <div className={`absolute top-1 max-w-full bottom-1 w-4 h-4 rounded-full bg-white transition-transform ${themeGradient ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+
+                  {themeColor === 'custom' && (
+                    <div className="space-y-2 pt-2">
+                      <div className="flex gap-4 w-full">
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                            {t.customPrimaryColor}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={customPrimaryColor}
+                              onChange={(e) => setCustomPrimaryColor(e.target.value)}
+                              className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0 outline-none"
+                            />
+                            <input 
+                              type="text" 
+                              value={customPrimaryColor}
+                              onChange={(e) => setCustomPrimaryColor(e.target.value)}
+                              className="w-20 min-w-0 px-2 py-1.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded outline-none transition-all text-xs font-mono text-white tracking-widest"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                            {t.customGradientColor}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={activeCustomGradientColor}
+                              onChange={(e) => setCustomGradientColor(e.target.value)}
+                              className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0 outline-none"
+                              disabled={!themeGradient}
+                            />
+                            <input 
+                              type="text" 
+                              value={activeCustomGradientColor}
+                              onChange={(e) => setCustomGradientColor(e.target.value)}
+                              disabled={!themeGradient}
+                              className="w-20 min-w-0 px-2 py-1.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded outline-none transition-all text-xs font-mono text-white tracking-widest disabled:opacity-50"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-4 w-full">
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                            {t.customBgMain}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={activeCustomBgMain}
+                              onChange={(e) => setCustomBgMain(e.target.value)}
+                              className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0 outline-none"
+                            />
+                            <input 
+                              type="text" 
+                              value={activeCustomBgMain}
+                              onChange={(e) => setCustomBgMain(e.target.value)}
+                              className="w-20 min-w-0 px-2 py-1.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded outline-none transition-all text-xs font-mono text-white tracking-widest"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                            {t.customBgSidebar}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={activeCustomBgSidebar}
+                              onChange={(e) => setCustomBgSidebar(e.target.value)}
+                              className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0 outline-none"
+                            />
+                            <input 
+                              type="text" 
+                              value={activeCustomBgSidebar}
+                              onChange={(e) => setCustomBgSidebar(e.target.value)}
+                              className="w-20 min-w-0 px-2 py-1.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded outline-none transition-all text-xs font-mono text-white tracking-widest"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4 w-full">
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5 mt-2">
+                            {t.customTextMain}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={activeCustomTextMain}
+                              onChange={(e) => setCustomTextMain(e.target.value)}
+                              className="w-8 h-8 p-0 border-0 rounded cursor-pointer shrink-0 outline-none"
+                            />
+                            <input 
+                              type="text" 
+                              value={activeCustomTextMain}
+                              onChange={(e) => setCustomTextMain(e.target.value)}
+                              className="w-20 min-w-0 px-2 py-1.5 bg-black border border-white/10 focus:border-blue-500/50 hover:border-white/20 rounded outline-none transition-all text-xs font-mono text-white tracking-widest"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex-1"></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeSettingsTab === 'data' && (
+                <div className="space-y-4">
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-sm text-gray-300">
+                    <p className="mb-4 text-xs">
+                      {lang === 'zh' ? '您可以在这里导出和导入您的设置配置（不包含敏感的 API Key 等）。聊天记录的导入导出请在左侧侧边栏中完成。' : 'You can import and export your settings here (excluding sensitive info like API Keys). Chat import/export is available in the left sidebar.'}
+                    </p>
+                    <div className="flex gap-2">
+                      <label 
+                        className="flex-1 flex justify-center bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border border-white/5"
+                      >
+                        <input 
+                          type="file" 
+                          accept=".json" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                              try {
+                                const data = JSON.parse(e.target?.result as string);
+                                if (data && typeof data === 'object') {
+                                  if (data.themeColor) setThemeColor(data.themeColor);
+                                  if (data.appName) setAppName(data.appName);
+                                  if (data.appIcon) setAppIcon(data.appIcon);
+                                  if (typeof data.autoRetry === 'boolean') setAutoRetry(data.autoRetry);
+                                  if (data.sendModifier) setSendModifier(data.sendModifier);
+                                  if (data.newlineModifier) setNewlineModifier(data.newlineModifier);
+                                  if (data.lang) setLang(data.lang);
+                                  if (data.themeMode) setThemeMode(data.themeMode);
+                                  if (typeof data.themeGradient === 'boolean') setThemeGradient(data.themeGradient);
+                                  if (data.customPrimaryColor) setCustomPrimaryColor(data.customPrimaryColor);
+                                  if (data.customGradientColor) setCustomGradientColor(data.customGradientColor);
+                                  if (data.customBgMain) setCustomBgMain(data.customBgMain);
+                                  if (data.customBgSidebar) setCustomBgSidebar(data.customBgSidebar);
+                                  if (data.customTextMain) setCustomTextMain(data.customTextMain);
+                                  alert(t.importSuccess);
+                                }
+                              } catch (err) {
+                                alert(t.importError);
+                              }
+                            };
+                            reader.readAsText(file);
+                            e.target.value = '';
+                          }} 
+                        />
+                        {t.importSettings}
+                      </label>
+                      <button
+                        onClick={() => {
+                          const config = {
+                            themeColor, appName, appIcon, autoRetry, sendModifier, newlineModifier, lang, themeMode, themeGradient, customPrimaryColor, customGradientColor, customBgMain, customBgSidebar, customTextMain
+                          };
+                          const dataStr = JSON.stringify(config, null, 2);
+                          const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                          const exportFileDefaultName = `config_${new Date().toISOString().slice(0,10)}.json`;
+                          const linkElement = document.createElement('a');
+                          linkElement.setAttribute('href', dataUri);
+                          linkElement.setAttribute('download', exportFileDefaultName);
+                          linkElement.click();
+                        }}
+                        className="flex-1 flex justify-center bg-white/10 hover:bg-white/20 text-white px-3 py-2.5 rounded-lg text-xs font-bold transition-colors border border-white/5"
+                      >
+                        {t.exportSettings}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="p-5 bg-black/40 border-t border-white/5 flex justify-end">
+            <div className="p-5 bg-black/40 border-t border-white/5 flex gap-2 justify-end items-center">
               <button 
                 onClick={() => {
                   setIsSettingsOpen(false);
                   setSettingsError('');
                 }}
-                className="bg-white hover:bg-gray-200 text-black px-5 py-2 rounded-xl text-xs font-bold transition-colors shadow-lg"
+                className="bg-white hover:bg-gray-200 text-black px-6 py-2.5 rounded-xl text-sm font-bold transition-colors shadow-lg"
               >
                 {t.saveClose}
               </button>
