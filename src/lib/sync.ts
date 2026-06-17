@@ -7,8 +7,6 @@ export const saveSettingsToFirebase = async (userId: string, settings: any) => {
   const payload = { ...settings, updatedAt: serverTimestamp() };
   if (!snap.exists()) {
     payload.createdAt = serverTimestamp();
-  } else {
-    payload.createdAt = snap.data().createdAt;
   }
   await setDoc(docRef, payload, { merge: true });
 };

@@ -1393,20 +1393,32 @@ export default function App() {
                 )}
               >
                 {/* Avatar */}
-                <div className={cn(
-                  "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-                  msg.role === 'user' ? "bg-indigo-900" : THEME_COLORS[themeColor]?.bg
-                )}>
-                  <span style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>{msg.role === 'user' ? 'ME' : 'AI'}</span>
-                </div>
+                {msg.role === 'user' && syncMode === 'cloud' && currentUser ? (
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden shrink-0 border border-white/10">
+                    {currentUser.photoURL ? (
+                      <img src={currentUser.photoURL} alt="User" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-indigo-900 flex items-center justify-center text-xs font-bold text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)]">
+                        {currentUser.displayName?.[0] || currentUser.email?.[0] || 'U'}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className={cn(
+                    "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
+                    msg.role === 'user' ? "bg-indigo-900" : THEME_COLORS[themeColor]?.bg
+                  )}>
+                    <span style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>{msg.role === 'user' ? 'ME' : 'AI'}</span>
+                  </div>
+                )}
 
                 {/* Bubble Content */}
                 <div className="space-y-2 flex-1 w-full overflow-hidden">
                   <div className={cn(
                     "text-xs font-bold uppercase tracking-tighter",
-                    msg.role === 'user' ? "text-gray-500" : THEME_COLORS[themeColor]?.text
+                    msg.role === 'user' ? "text-gray-500 max-w-full truncate" : THEME_COLORS[themeColor]?.text
                   )}>
-                    {msg.role === 'user' ? t.userRequest : (msg.model || t.assistantResponse)}
+                    {msg.role === 'user' ? (syncMode === 'cloud' && currentUser ? (currentUser.displayName || currentUser.email) : t.userRequest) : (msg.model || t.assistantResponse)}
                   </div>
                   
                   {msg.role === 'user' ? (
@@ -2147,6 +2159,17 @@ export default function App() {
                                   if (data.themeMode) setThemeMode(data.themeMode);
                                   if (typeof data.themeGradient === 'boolean') setThemeGradient(data.themeGradient);
                                   if (data.customPrimaryColor) setCustomPrimaryColor(data.customPrimaryColor);
+                                  
+                                  if (data.customGradientColorDark) setCustomGradientColorDark(data.customGradientColorDark);
+                                  if (data.customGradientColorLight) setCustomGradientColorLight(data.customGradientColorLight);
+                                  if (data.customBgMainDark) setCustomBgMainDark(data.customBgMainDark);
+                                  if (data.customBgMainLight) setCustomBgMainLight(data.customBgMainLight);
+                                  if (data.customBgSidebarDark) setCustomBgSidebarDark(data.customBgSidebarDark);
+                                  if (data.customBgSidebarLight) setCustomBgSidebarLight(data.customBgSidebarLight);
+                                  if (data.customTextMainDark) setCustomTextMainDark(data.customTextMainDark);
+                                  if (data.customTextMainLight) setCustomTextMainLight(data.customTextMainLight);
+                                  
+                                  // Fallback for old configs
                                   if (data.customGradientColor) setCustomGradientColor(data.customGradientColor);
                                   if (data.customBgMain) setCustomBgMain(data.customBgMain);
                                   if (data.customBgSidebar) setCustomBgSidebar(data.customBgSidebar);
@@ -2166,7 +2189,12 @@ export default function App() {
                       <button
                         onClick={() => {
                           const config = {
-                            themeColor, appName, appIcon, autoRetry, sendModifier, newlineModifier, lang, themeMode, themeGradient, customPrimaryColor, customGradientColor, customBgMain, customBgSidebar, customTextMain
+                            themeColor, appName, appIcon, autoRetry, sendModifier, newlineModifier, lang, themeMode, themeGradient, 
+                            customPrimaryColor, 
+                            customGradientColorDark, customGradientColorLight, 
+                            customBgMainDark, customBgMainLight, 
+                            customBgSidebarDark, customBgSidebarLight, 
+                            customTextMainDark, customTextMainLight
                           };
                           const dataStr = JSON.stringify(config, null, 2);
                           const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
