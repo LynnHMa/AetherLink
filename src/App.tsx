@@ -1233,8 +1233,9 @@ export default function App() {
                       setIsCloudLoading(true);
                       const provider = new GoogleAuthProvider();
                       await signInWithPopup(auth, provider);
-                    } catch (e) {
+                    } catch (e: any) {
                       console.error(e);
+                      alert((lang === 'zh' ? '登录失败: ' : 'Login failed: ') + (e?.message || e));
                       setIsCloudLoading(false);
                       return;
                     }
