@@ -382,6 +382,7 @@ export default function App() {
   }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry, sendModifier, newlineModifier, appName, appIcon, themeColor, themeMode, themeGradient, customPrimaryColor, customGradientColorDark, customGradientColorLight, customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, customTextMainDark, customTextMainLight, syncMode]);
 
   useEffect(() => {
+    if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setCurrentUser(u);
       if (u && syncMode === 'cloud') {
@@ -1223,6 +1224,10 @@ export default function App() {
               </button>
               <button
                 onClick={async () => {
+                  if (!auth) {
+                    alert(lang === 'zh' ? '云端功能尚未配置，请检查相关环境变量。' : 'Cloud function is not configured, please check environment variables.');
+                    return;
+                  }
                   if (!currentUser) {
                     try {
                       setIsCloudLoading(true);
