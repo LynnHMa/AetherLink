@@ -9,7 +9,18 @@ let firebaseConfig: any = null;
 try {
   firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
 } catch (e) {
-  console.log("No firebase-applet-config.json found, cloud sync delegation may fail.");
+  if (process.env.VITE_FIREBASE_API_KEY) {
+    firebaseConfig = {
+      apiKey: process.env.VITE_FIREBASE_API_KEY,
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+      storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.VITE_FIREBASE_APP_ID
+    };
+  } else {
+    console.log("No firebase-applet-config.json or Firebase env vars found, cloud sync delegation may fail.");
+  }
 }
 
 async function handleCloudSync(syncProps: any, finalMessage: any) {
