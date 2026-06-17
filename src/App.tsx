@@ -536,10 +536,20 @@ export default function App() {
           finalPrompt = `Base context: ${userPrompts.slice(0, -1).join(' -> ')}. Apply modification: ${userMsg.content}`;
         }
 
+        let sizeStr = "1024x1024";
+        const pLower = finalPrompt.toLowerCase();
+        if (pLower.includes("16:9") || pLower.includes("16比9") || pLower.includes("landscape") || pLower.includes("宽屏") || pLower.includes("横图") || pLower.includes("横向") || pLower.includes("横版") || pLower.includes("横屏") || pLower.includes("4:3") || pLower.includes("3:2") || pLower.includes("电影感比例")) {
+          sizeStr = "1792x1024";
+        } else if (pLower.includes("9:16") || pLower.includes("9比16") || pLower.includes("portrait") || pLower.includes("竖屏") || pLower.includes("竖向") || pLower.includes("竖图") || pLower.includes("竖版") || pLower.includes("3:4") || pLower.includes("2:3") || pLower.includes("手机壁纸")) {
+          sizeStr = "1024x1792";
+        } else if (pLower.includes("1:1") || pLower.includes("square") || pLower.includes("方形") || pLower.includes("正方形") || pLower.includes("头像")) {
+          sizeStr = "1024x1024";
+        }
+
         const payload: any = {
             prompt: finalPrompt,
             model: imageModel,
-            size: "1024x1024",
+            size: sizeStr,
             n: 1,
             baseUrl,
             apiKey
@@ -594,11 +604,11 @@ export default function App() {
           throw new Error(`JSON parse error. Server returned: ${rawResponseText.slice(0, 200).replace(/\n/g, ' ')}`);
         }
 
-        const imageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
+        let finalImageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
 
-        if (imageUrl) {
+        if (finalImageUrl) {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `![Generated Image](${imageUrl})`, isImage: true, imageUrl: imageUrl, isError: false } : m
+            m.id === assistantId ? { ...m, content: `![Generated Image](${finalImageUrl})`, isImage: true, imageUrl: finalImageUrl, isError: false } : m
           ));
         } else {
           throw new Error(`Proxy Success (200), but missing image URL. Proxy response: ${JSON.stringify(data).slice(0, 500)}`);
@@ -776,37 +786,39 @@ export default function App() {
       if (!url.startsWith('data:')) {
          fetchUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
       }
-      const response = await fetch(fetchUrl);
-      const blob = await response.blob();
-      
-      let copyBlob = blob;
-      if (blob.type !== 'image/png') {
-        const imageBitmap = await createImageBitmap(blob);
-        const canvas = document.createElement('canvas');
-        canvas.width = imageBitmap.width;
-        canvas.height = imageBitmap.height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(imageBitmap, 0, 0);
-          copyBlob = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob((b) => {
-              if (b) resolve(b);
-              else reject(new Error('Canvas toBlob failed'));
-            }, 'image/png');
-          });
-        }
-      }
 
       await navigator.clipboard.write([
         new ClipboardItem({
-          'image/png': copyBlob
+          'image/png': new Promise<Blob>(async (resolve, reject) => {
+            try {
+              const response = await fetch(fetchUrl);
+              const blob = await response.blob();
+              
+              const imageBitmap = await createImageBitmap(blob);
+              const canvas = document.createElement('canvas');
+              canvas.width = imageBitmap.width;
+              canvas.height = imageBitmap.height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(imageBitmap, 0, 0);
+                canvas.toBlob((b) => {
+                  if (b) resolve(b);
+                  else reject(new Error('Canvas toBlob failed'));
+                }, 'image/png');
+              } else {
+                resolve(blob);
+              }
+            } catch(e) {
+              reject(e);
+            }
+          })
         })
       ]);
     } catch (err) {
       console.error('Failed to copy image: ', err);
-      alert(lang === 'zh' ? '复制失败，请尝试点击上方下载按钮' : 'Copy failed, please try downloading.');
     }
   };
 
