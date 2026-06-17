@@ -4,6 +4,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { auth } from './lib/firebase';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
+import { saveSettingsToFirebase, loadSettingsFromFirebase, saveSessionToFirebase, loadSessionsFromFirebase, deleteSessionFromFirebase } from './lib/sync';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -239,6 +242,10 @@ export default function App() {
   const [editingTitle, setEditingTitle] = useState('');
   const [activeSettingsTab, setActiveSettingsTab] = useState<'api' | 'general' | 'appearance' | 'data'>('api');
 
+  const [syncMode, setSyncMode] = useState<'local' | 'cloud'>(() => (localStorage.getItem('llm_sync_mode') as 'local' | 'cloud') || 'local');
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
+
   const autoRetryRef = useRef(autoRetry);
   useEffect(() => {
     autoRetryRef.current = autoRetry;
@@ -288,7 +295,9 @@ export default function App() {
             newTitle = firstUser.content.slice(0, 20) + (firstUser.content.length > 20 ? '...' : '');
           }
         }
-        return { ...s, messages: newMessages, title: newTitle };
+        const newSess = { ...s, messages: newMessages, title: newTitle, updatedAt: Date.now() };
+        if (syncMode === 'cloud' && currentUser) saveSessionToFirebase(currentUser.uid, newSess).catch(console.error);
+        return newSess;
       }
       return s;
     }));
@@ -296,11 +305,30 @@ export default function App() {
 
   const createNewSession = () => {
     const id = Date.now().toString();
-    setSessions(prev => [{ id, title: t.newChat, createdAt: Date.now(), messages: [] }, ...prev]);
+    const sess = { id, title: t.newChat, createdAt: Date.now(), messages: [] };
+    setSessions(prev => [sess, ...prev]);
+    if (syncMode === 'cloud' && currentUser) saveSessionToFirebase(currentUser.uid, sess).catch(console.error);
     setCurrentSessionId(id);
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
     }
+  };
+
+  const updateSessionTitle = (sessionId: string, newTitle: string) => {
+    setSessions(prev => prev.map(sess => {
+      if (sess.id === sessionId) {
+        const newSess = { ...sess, title: newTitle || t.newChat, updatedAt: Date.now() };
+        if (syncMode === 'cloud' && currentUser) saveSessionToFirebase(currentUser.uid, newSess).catch(console.error);
+        return newSess;
+      }
+      return sess;
+    }));
+    setEditingSessionId(null);
+  };
+
+  const removeSession = (sessionId: string) => {
+    setSessions(prev => prev.filter(sess => sess.id !== sessionId));
+    if (syncMode === 'cloud' && currentUser) deleteSessionFromFirebase(currentUser.uid, sessionId).catch(console.error);
   };
 
   const [isClearingChat, setIsClearingChat] = useState(false);
@@ -350,7 +378,101 @@ export default function App() {
     localStorage.setItem('llm_custom_bg_sidebar_light', customBgSidebarLight);
     localStorage.setItem('llm_custom_text_main_dark', customTextMainDark);
     localStorage.setItem('llm_custom_text_main_light', customTextMainLight);
-  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry, sendModifier, newlineModifier, appName, appIcon, themeColor, themeMode, themeGradient, customPrimaryColor, customGradientColorDark, customGradientColorLight, customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, customTextMainDark, customTextMainLight]);
+    localStorage.setItem('llm_sync_mode', syncMode);
+  }, [baseUrl, apiKey, chatModel, imageModel, mode, chatModels, imageModels, lang, autoRetry, sendModifier, newlineModifier, appName, appIcon, themeColor, themeMode, themeGradient, customPrimaryColor, customGradientColorDark, customGradientColorLight, customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, customTextMainDark, customTextMainLight, syncMode]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setCurrentUser(u);
+      if (u && syncMode === 'cloud') {
+        loadDataFromCloud(u);
+      }
+    });
+    return unsubscribe;
+  }, [syncMode]);
+
+  useEffect(() => {
+    if (syncMode === 'cloud' && currentUser && !isCloudLoading) {
+      const settingsToSync = {
+        syncMode, chatModel, imageModel, mode, lang, autoRetry, sendModifier, newlineModifier, 
+        appName, appIcon, themeColor, themeMode, themeGradient, 
+        customPrimaryColor, customGradientColorDark, customGradientColorLight, 
+        customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, 
+        customTextMainDark, customTextMainLight, chatModels, imageModels
+      };
+      saveSettingsToFirebase(currentUser.uid, settingsToSync).catch(console.error);
+    }
+  }, [chatModel, imageModel, mode, lang, autoRetry, sendModifier, newlineModifier, appName, appIcon, themeColor, themeMode, themeGradient, customPrimaryColor, customGradientColorDark, customGradientColorLight, customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, customTextMainDark, customTextMainLight, chatModels, imageModels, syncMode, currentUser, isCloudLoading]);
+
+  const loadDataFromCloud = async (u: FirebaseUser) => {
+    setIsCloudLoading(true);
+    try {
+      const settings = await loadSettingsFromFirebase(u.uid);
+      if (settings) {
+        if (settings.chatModel) setChatModel(settings.chatModel);
+        if (settings.imageModel) setImageModel(settings.imageModel);
+        if (settings.mode) setMode(settings.mode);
+        if (settings.lang) setLang(settings.lang);
+        if (typeof settings.autoRetry === 'boolean') setAutoRetry(settings.autoRetry);
+        if (settings.sendModifier) setSendModifier(settings.sendModifier);
+        if (settings.newlineModifier) setNewlineModifier(settings.newlineModifier);
+        if (settings.appName) setAppName(settings.appName);
+        if (settings.appIcon) setAppIcon(settings.appIcon);
+        if (settings.themeColor) setThemeColor(settings.themeColor);
+        if (settings.themeMode) setThemeMode(settings.themeMode);
+        if (typeof settings.themeGradient === 'boolean') setThemeGradient(settings.themeGradient);
+        if (settings.customPrimaryColor) setCustomPrimaryColor(settings.customPrimaryColor);
+        if (settings.customGradientColorDark) setCustomGradientColorDark(settings.customGradientColorDark);
+        if (settings.customGradientColorLight) setCustomGradientColorLight(settings.customGradientColorLight);
+        if (settings.customBgMainDark) setCustomBgMainDark(settings.customBgMainDark);
+        if (settings.customBgMainLight) setCustomBgMainLight(settings.customBgMainLight);
+        if (settings.customBgSidebarDark) setCustomBgSidebarDark(settings.customBgSidebarDark);
+        if (settings.customBgSidebarLight) setCustomBgSidebarLight(settings.customBgSidebarLight);
+        if (settings.customTextMainDark) setCustomTextMainDark(settings.customTextMainDark);
+        if (settings.customTextMainLight) setCustomTextMainLight(settings.customTextMainLight);
+        if (settings.chatModels) setChatModels(settings.chatModels);
+        if (settings.imageModels) setImageModels(settings.imageModels);
+      }
+      
+      const userSessions = await loadSessionsFromFirebase(u.uid);
+      if (userSessions && userSessions.length > 0) {
+        // Sort by updatedAt descending
+        userSessions.sort((a, b) => b.updatedAt - a.updatedAt);
+        setSessions(userSessions as any);
+        if (!currentSessionId || !userSessions.find(s => s.id === currentSessionId)) {
+          setCurrentSessionId(userSessions[0].id);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
+
+  const uploadLocalToCloud = async () => {
+    if (!currentUser) return;
+    setIsCloudLoading(true);
+    try {
+      const settingsToSync = {
+        syncMode: 'cloud', chatModel, imageModel, mode, lang, autoRetry, sendModifier, newlineModifier, 
+        appName, appIcon, themeColor, themeMode, themeGradient, 
+        customPrimaryColor, customGradientColorDark, customGradientColorLight, 
+        customBgMainDark, customBgMainLight, customBgSidebarDark, customBgSidebarLight, 
+        customTextMainDark, customTextMainLight, chatModels, imageModels
+      };
+      await saveSettingsToFirebase(currentUser.uid, settingsToSync);
+      for (const session of sessions) {
+        await saveSessionToFirebase(currentUser.uid, session);
+      }
+      alert(lang === 'zh' ? '同步成功' : 'Sync Successful');
+    } catch (e) {
+      console.error(e);
+      alert(lang === 'zh' ? '同步失败' : 'Sync Failed');
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -397,6 +519,13 @@ export default function App() {
   };
 
   const handleChatCompletion = async (userMsg: Message) => {
+    const syncProps = syncMode === 'cloud' && currentUser ? {
+        userId: currentUser.uid,
+        uid: currentUser.uid,
+        sessionId: currentSessionId,
+        idToken: await currentUser.getIdToken()
+    } : null;
+
     const newChatHistory = [...messages, userMsg].map(m => {
       let textContent = m.content;
       if (m.isImage && m.imageUrl) {
@@ -439,7 +568,9 @@ export default function App() {
             model: chatModel,
             baseUrl,
             apiKey,
-            stream: true
+            stream: true,
+            syncProps,
+            assistantId
           })
         });
 
@@ -509,6 +640,13 @@ export default function App() {
   };
 
   const handleImageGeneration = async (userMsg: Message) => {
+    const syncProps = syncMode === 'cloud' && currentUser ? {
+        userId: currentUser.uid,
+        uid: currentUser.uid,
+        sessionId: currentSessionId,
+        idToken: await currentUser.getIdToken()
+    } : null;
+
     const assistantId = Date.now().toString() + '-assistant';
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: t.generatingImage, model: imageModel }]);
     
@@ -584,7 +722,7 @@ export default function App() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ ...payload, syncProps, assistantId })
         });
 
         if (!response.ok) {
@@ -607,6 +745,22 @@ export default function App() {
         let finalImageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
 
         if (finalImageUrl) {
+          if (!finalImageUrl.startsWith('data:')) {
+             try {
+                const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(finalImageUrl)}`);
+                if (res.ok) {
+                   const blob = await res.blob();
+                   finalImageUrl = await new Promise((resolve) => {
+                      const reader = new FileReader();
+                      reader.onloadend = () => resolve(reader.result as string);
+                      reader.readAsDataURL(blob);
+                   });
+                }
+             } catch(e) {
+                console.error("Failed to convert image to data URL", e);
+             }
+          }
+          
           setMessages(prev => prev.map(m => 
             m.id === assistantId ? { ...m, content: `![Generated Image](${finalImageUrl})`, isImage: true, imageUrl: finalImageUrl, isError: false } : m
           ));
@@ -995,15 +1149,9 @@ export default function App() {
                         autoFocus
                         value={editingTitle}
                         onChange={(e) => setEditingTitle(e.target.value)}
-                        onBlur={() => {
-                          setSessions(prev => prev.map(sess => sess.id === s.id ? { ...sess, title: editingTitle || t.newChat } : sess));
-                          setEditingSessionId(null);
-                        }}
+                        onBlur={() => updateSessionTitle(s.id, editingTitle)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            setSessions(prev => prev.map(sess => sess.id === s.id ? { ...sess, title: editingTitle || t.newChat } : sess));
-                            setEditingSessionId(null);
-                          }
+                          if (e.key === 'Enter') updateSessionTitle(s.id, editingTitle);
                           if (e.key === 'Escape') setEditingSessionId(null);
                         }}
                         className="flex-1 min-w-0 bg-black/50 border border-white/10 rounded px-1.5 py-0.5 text-sm text-white outline-none"
@@ -1047,7 +1195,7 @@ export default function App() {
                       <div 
                          onClick={(e) => {
                            e.stopPropagation();
-                           setSessions(prev => prev.filter(sess => sess.id !== s.id));
+                           removeSession(s.id);
                          }}
                          className="p-1 hover:text-red-400 transition-opacity"
                       >
@@ -1061,7 +1209,72 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mt-auto p-4 border-t border-white/5 space-y-2">
+        <div className="mt-auto p-4 border-t border-white/5 space-y-2 relative">
+          <div className="bg-black/20 rounded-lg p-2 border border-white/5 space-y-2 mb-2">
+            <div className="flex bg-black/50 p-1 rounded border border-white/5">
+              <button
+                onClick={() => setSyncMode('local')}
+                className={cn(
+                  "flex-1 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors",
+                  syncMode === 'local' ? "bg-white/20 text-white" : "text-gray-500 hover:text-white"
+                )}
+              >
+                {lang === 'zh' ? '本地' : 'Local'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!currentUser) {
+                    try {
+                      setIsCloudLoading(true);
+                      const provider = new GoogleAuthProvider();
+                      await signInWithPopup(auth, provider);
+                    } catch (e) {
+                      console.error(e);
+                      setIsCloudLoading(false);
+                      return;
+                    }
+                  }
+                  setSyncMode('cloud');
+                }}
+                className={cn(
+                  "flex-1 py-1 text-[10px] font-bold rounded uppercase tracking-wider transition-colors",
+                  syncMode === 'cloud' ? "bg-blue-500/80 text-white" : "text-gray-500 hover:text-white"
+                )}
+                disabled={isCloudLoading}
+              >
+                {isCloudLoading ? '...' : (lang === 'zh' ? '云端' : 'Cloud')}
+              </button>
+            </div>
+            {syncMode === 'cloud' && currentUser && (
+              <>
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2 overflow-hidden flex-1">
+                    {currentUser.photoURL ? (
+                      <img src={currentUser.photoURL} alt="Avatar" className="w-5 h-5 rounded-full shrink-0" />
+                    ) : (
+                      <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                        {currentUser.displayName?.[0] || currentUser.email?.[0] || 'U'}
+                      </div>
+                    )}
+                    <span className="text-[10px] text-gray-300 truncate font-medium">
+                      {currentUser.displayName || currentUser.email}
+                    </span>
+                  </div>
+                  <button onClick={() => signOut(auth)} className="text-[10px] text-gray-500 hover:text-white transition-colors p-1" title={lang === 'zh' ? '登出' : 'Sign Out'}>
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+                <button
+                  onClick={uploadLocalToCloud}
+                  disabled={isCloudLoading}
+                  className="w-full bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded text-[10px] font-medium border border-white/10 disabled:opacity-50 transition-colors text-center"
+                >
+                  {lang === 'zh' ? '强制覆盖云端数据' : 'Overwrite Cloud Data'}
+                </button>
+              </>
+            )}
+          </div>
+          
           <div className="flex gap-2">
             <label 
               title={t.importData}
@@ -1906,7 +2119,7 @@ export default function App() {
                 <div className="space-y-4">
                   <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-sm text-gray-300">
                     <p className="mb-4 text-xs">
-                      {lang === 'zh' ? '您可以在这里导出和导入您的设置配置（不包含敏感的 API Key 等）。聊天记录的导入导出请在左侧侧边栏中完成。' : 'You can import and export your settings here (excluding sensitive info like API Keys). Chat import/export is available in the left sidebar.'}
+                      {lang === 'zh' ? '您可以在这里导出和导入您的本地设置配置（不包含敏感的 API Key 等）。' : 'You can import and export your local settings here (excluding sensitive info).'}
                     </p>
                     <div className="flex gap-2">
                       <label 

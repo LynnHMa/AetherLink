@@ -1,6 +1,47 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { initializeServerApp } from 'firebase/app';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import fs from 'fs';
+
+let firebaseConfig: any = null;
+try {
+  firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+} catch (e) {
+  console.log("No firebase-applet-config.json found, cloud sync delegation may fail.");
+}
+
+async function handleCloudSync(syncProps: any, finalMessage: any) {
+    if (!firebaseConfig || !syncProps || !syncProps.idToken || !syncProps.userId || !syncProps.sessionId) return;
+    
+    try {
+        console.log(`Delegating offline save for user ${syncProps.userId}, session ${syncProps.sessionId}`);
+        const app = initializeServerApp(firebaseConfig, {
+            authIdToken: syncProps.idToken
+        });
+        const db = getFirestore(app);
+        const docRef = doc(db, `users/${syncProps.userId}/sessions`, syncProps.sessionId);
+        
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+            const data = snap.data();
+            const messages = data.messages || [];
+            
+            // Check if assistantId already exists to update it, else append
+            const existingIdx = messages.findIndex((m: any) => m.id === finalMessage.id);
+            if (existingIdx !== -1) {
+                 messages[existingIdx] = finalMessage;
+            } else {
+                 messages.push(finalMessage);
+            }
+            
+            await setDoc(docRef, { ...data, messages, updatedAt: Date.now() }, { merge: true });
+        }
+    } catch(e) {
+        console.error("Offline delegation save failed", e);
+    }
+}
 
 async function startServer() {
   const app = express();
@@ -11,7 +52,12 @@ async function startServer() {
 
   // Chat completions endpoint proxy (supports streaming)
   app.post('/api/chat', async (req, res) => {
-    const { messages, model, baseUrl, apiKey, stream } = req.body;
+    let isClientDisconnected = false;
+    req.on('close', () => {
+        isClientDisconnected = true;
+    });
+
+    const { messages, model, baseUrl, apiKey, stream, syncProps, assistantId } = req.body;
     
     try {
       // standard openai-compatible endpoint format
@@ -38,18 +84,48 @@ async function startServer() {
         
         if (response.body) {
           const reader = response.body.getReader();
+          let fullContent = "";
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            res.write(value);
+            
+            const chunk = Buffer.from(value).toString('utf8');
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+               if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                   try {
+                       const parsed = JSON.parse(line.slice(6));
+                       if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
+                           fullContent += parsed.choices[0].delta.content;
+                       }
+                   } catch(e) {}
+               }
+            }
+
+            if (!isClientDisconnected && !res.socket?.destroyed) {
+              res.write(value);
+            }
           }
-          res.end();
+          if (!isClientDisconnected && !res.socket?.destroyed) {
+             res.end();
+          }
+
+          if (isClientDisconnected && syncProps && assistantId && fullContent) {
+              const finalMessage = { id: assistantId, role: 'assistant', content: fullContent, isError: false };
+              await handleCloudSync(syncProps, finalMessage);
+          }
         } else {
-          res.end();
+          if (!isClientDisconnected) res.end();
         }
       } else {
         const data = await response.json();
-        res.json(data);
+        if (!isClientDisconnected) {
+           res.json(data);
+        }
+        if (isClientDisconnected && syncProps && assistantId && data.choices && data.choices[0]) {
+             const finalMessage = { id: assistantId, role: 'assistant', content: data.choices[0].message?.content || '', isError: false };
+             await handleCloudSync(syncProps, finalMessage);
+        }
       }
     } catch (e: any) {
       console.error('Chat API Error:', e);
@@ -59,7 +135,12 @@ async function startServer() {
 
   // Image generations endpoint proxy
   app.post('/api/image', async (req, res) => {
-    const { prompt, model, baseUrl, apiKey, image, images } = req.body;
+    let isClientDisconnected = false;
+    req.on('close', () => {
+        isClientDisconnected = true;
+    });
+
+    const { prompt, model, baseUrl, apiKey, image, images, syncProps, assistantId } = req.body;
     
     try {
       const safeBaseUrl = baseUrl || 'https://api.openai.com/v1';
@@ -106,6 +187,8 @@ async function startServer() {
         const bodyPayload: any = { prompt, model, ...req.body };
         delete bodyPayload.baseUrl;
         delete bodyPayload.apiKey;
+        delete bodyPayload.syncProps;
+        delete bodyPayload.assistantId;
 
         // Ensure n and size are present for standards, but let proxy override if they want
         if (!bodyPayload.n) bodyPayload.n = 1;
@@ -146,7 +229,31 @@ async function startServer() {
       } catch (err) {
         throw new Error(`API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}`);
       }
-      res.json(data);
+      
+      if (!isClientDisconnected && !res.socket?.destroyed) {
+         res.json(data);
+      }
+
+      if (isClientDisconnected && syncProps && assistantId && data.data && data.data[0]) {
+          let finalImageUrl = data.data[0].url || (data.data[0].b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
+          if (finalImageUrl) {
+              if (!finalImageUrl.startsWith('data:')) {
+                  try {
+                      const imgRes = await fetch(finalImageUrl);
+                      if (imgRes.ok) {
+                          const buffer = await imgRes.arrayBuffer();
+                          const base64 = Buffer.from(buffer).toString('base64');
+                          const mime = imgRes.headers.get('content-type') || 'image/png';
+                          finalImageUrl = `data:${mime};base64,${base64}`;
+                      }
+                  } catch (e) {
+                      console.error("Failed to proxy image offline", e);
+                  }
+              }
+              const finalMessage = { id: assistantId, role: 'assistant', content: `![Generated Image](${finalImageUrl})`, isImage: true, imageUrl: finalImageUrl, isError: false };
+              await handleCloudSync(syncProps, finalMessage);
+          }
+      }
     } catch (e: any) {
       console.error('Image API Error:', e);
       res.status(500).json({ error: e.message || 'Internal Server Error' });

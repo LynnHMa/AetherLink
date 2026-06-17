@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and overall settings (except API Keys).",
+      "type": "object",
+      "properties": {
+        "syncMode": {
+          "type": "string",
+          "enum": ["local", "cloud"]
+        },
+        "chatModel": { "type": "string" },
+        "imageModel": { "type": "string" },
+        "mode": { "type": "string", "enum": ["text", "image"] },
+        "lang": { "type": "string", "enum": ["zh", "en"] },
+        "autoRetry": { "type": "boolean" },
+        "sendModifier": { "type": "string" },
+        "newlineModifier": { "type": "string" },
+        "appName": { "type": "string" },
+        "appIcon": { "type": "string" },
+        "themeColor": { "type": "string" },
+        "themeMode": { "type": "string", "enum": ["dark", "light"] },
+        "themeGradient": { "type": "boolean" },
+        "customPrimaryColor": { "type": "string" },
+        "customGradientColorDark": { "type": "string" },
+        "customGradientColorLight": { "type": "string" },
+        "customBgMainDark": { "type": "string" },
+        "customBgMainLight": { "type": "string" },
+        "customBgSidebarDark": { "type": "string" },
+        "customBgSidebarLight": { "type": "string" },
+        "customTextMainDark": { "type": "string" },
+        "customTextMainLight": { "type": "string" },
+        "chatModels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "imageModels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["updatedAt", "createdAt"]
+    },
+    "ChatSession": {
+      "title": "Chat Session",
+      "description": "A chat session containing multiple messages.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "messages": {
+          "type": "array",
+          "description": "A serialized list of messages, as JS arrays."
+        }
+      },
+      "required": ["id", "title", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User document containing the user's settings and sync configuration."
+    },
+    "users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "User individual chat sessions."
+    }
+  }
+}
