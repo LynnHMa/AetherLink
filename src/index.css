@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@source "../src";
+@source "./";
 
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;

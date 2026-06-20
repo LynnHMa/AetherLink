@@ -736,11 +736,16 @@ export default function App() {
         }
 
         let data;
-        const rawResponseText = await response.text();
+        let rawResponseText = await response.text();
+        rawResponseText = rawResponseText.trim();
         try {
           data = JSON.parse(rawResponseText);
         } catch (err) {
           throw new Error(`JSON parse error. Server returned: ${rawResponseText.slice(0, 200).replace(/\n/g, ' ')}`);
+        }
+
+        if (data._statusError) {
+          throw new Error(`API Proxy Error (${data._statusError}): ${data.error || 'Unknown error'}`);
         }
 
         let finalImageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
@@ -1469,7 +1474,11 @@ export default function App() {
                             <button 
                               onClick={(e) => {
                                 e.preventDefault();
-                                fetch(msg.imageUrl!)
+                                let fetchUrl = msg.imageUrl!;
+                                if (!fetchUrl.startsWith('data:')) {
+                                   fetchUrl = `/api/proxy-image?url=${encodeURIComponent(fetchUrl)}`;
+                                }
+                                fetch(fetchUrl)
                                   .then(res => res.blob())
                                   .then(blob => {
                                     const url = window.URL.createObjectURL(blob);

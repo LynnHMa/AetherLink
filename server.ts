@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { initializeServerApp } from 'firebase/app';
@@ -57,6 +58,7 @@ async function handleCloudSync(syncProps: any, finalMessage: any) {
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const server = http.createServer(app);
 
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -220,7 +222,21 @@ async function startServer() {
         };
       }
 
-      const response = await fetch(url, options);
+      // Keep alive by sending spaces every 10 seconds
+      res.setHeader('Content-Type', 'application/json');
+      res.flushHeaders();
+      const keepAliveInterval = setInterval(() => {
+          if (!isClientDisconnected) {
+             res.write(' ');
+          }
+      }, 10000);
+
+      let response: Response;
+      try {
+         response = await fetch(url, options);
+      } finally {
+         clearInterval(keepAliveInterval);
+      }
 
       if (!response.ok) {
         let errStr = await response.text();
@@ -230,7 +246,10 @@ async function startServer() {
             errStr = errJson.error.message;
           }
         } catch (e) {}
-        return res.status(response.status).json({ error: errStr || response.statusText });
+        if (!isClientDisconnected && !res.socket?.destroyed) {
+           res.end(JSON.stringify({ error: errStr || response.statusText, _statusError: response.status }));
+        }
+        return;
       }
 
       const rawText = await response.text();
@@ -238,11 +257,15 @@ async function startServer() {
       try {
         data = JSON.parse(rawText);
       } catch (err) {
-        throw new Error(`API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}`);
+        if (!isClientDisconnected && !res.socket?.destroyed) {
+           res.end(JSON.stringify({ error: `API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}`, _statusError: 500 }));
+        }
+        return;
       }
       
       if (!isClientDisconnected && !res.socket?.destroyed) {
-         res.json(data);
+         res.write(JSON.stringify(data));
+         res.end();
       }
 
       if (isClientDisconnected && syncProps && assistantId && data.data && data.data[0]) {
@@ -289,7 +312,10 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: { server }
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -311,9 +337,13 @@ async function startServer() {
     }
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  server.setTimeout(600000);
+  server.keepAliveTimeout = 600000;
+  server.headersTimeout = 601000;
 }
 
 startServer();
