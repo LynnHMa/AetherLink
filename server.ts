@@ -64,7 +64,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
   // Chat completions endpoint proxy (supports streaming)
-  app.post('/api/chat', async (req, res) => {
+  app.post(['/api/srv-message-relay', '/api/v1/completions'], async (req, res) => {
     let isClientDisconnected = false;
     req.on('close', () => {
         isClientDisconnected = true;
@@ -142,12 +142,14 @@ async function startServer() {
       }
     } catch (e: any) {
       console.error('Chat API Error:', e);
-      res.status(500).json({ error: e.message || 'Internal Server Error' });
+      if (!res.headersSent) {
+         res.status(500).json({ error: e.message || 'Internal Server Error' });
+      }
     }
   });
 
   // Image generations endpoint proxy
-  app.post('/api/image', async (req, res) => {
+  app.post(['/api/srv-media-relay', '/api/v1/paintings', '/api/v1/generations'], async (req, res) => {
     let isClientDisconnected = false;
     req.on('close', () => {
         isClientDisconnected = true;
@@ -184,8 +186,9 @@ async function startServer() {
           
           if (i === 0) {
             formData.append('image', blob, filename);
-          } else if (i === 1) {
-             formData.append('mask', blob, filename);
+          } else {
+             formData.append('image', blob, filename);
+             if (i === 1) formData.append('mask', blob, filename);
           }
         }
 
@@ -197,6 +200,7 @@ async function startServer() {
           body: formData as unknown as BodyInit
         };
       } else {
+        url = `${safeBaseUrl.replace(/\/$/, '')}/images/generations`;
         const bodyPayload: any = { prompt, model, ...req.body };
         delete bodyPayload.baseUrl;
         delete bodyPayload.apiKey;
@@ -222,51 +226,39 @@ async function startServer() {
         };
       }
 
-      // Keep alive by sending spaces every 10 seconds
-      res.setHeader('Content-Type', 'application/json');
-      res.flushHeaders();
-      const keepAliveInterval = setInterval(() => {
-          if (!isClientDisconnected) {
-             res.write(' ');
-          }
-      }, 10000);
-
       let response: Response;
       try {
          response = await fetch(url, options);
-      } finally {
-         clearInterval(keepAliveInterval);
+      } catch (err: any) {
+         return res.status(500).json({ error: err.message || 'Node fetch threw an error' });
       }
 
       if (!response.ok) {
-        let errStr = await response.text();
-        try {
-          const errJson = JSON.parse(errStr);
-          if (errJson.error && errJson.error.message) {
-            errStr = errJson.error.message;
-          }
-        } catch (e) {}
-        if (!isClientDisconnected && !res.socket?.destroyed) {
-           res.end(JSON.stringify({ error: errStr || response.statusText, _statusError: response.status }));
-        }
-        return;
+         let errStr = await response.text();
+         try {
+           const errJson = JSON.parse(errStr);
+           if (errJson.error && errJson.error.message) {
+             errStr = errJson.error.message;
+           }
+         } catch (e) {}
+         return res.status(response.status).json({ error: errStr || response.statusText });
       }
 
-      const rawText = await response.text();
+      let rawText;
+      try {
+         rawText = await response.text();
+      } catch (err: any) {
+         return res.status(500).json({ error: 'Failed to read response body: ' + err.message });
+      }
+
       let data;
       try {
         data = JSON.parse(rawText);
       } catch (err) {
-        if (!isClientDisconnected && !res.socket?.destroyed) {
-           res.end(JSON.stringify({ error: `API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}`, _statusError: 500 }));
-        }
-        return;
+         return res.status(500).json({ error: `API returned invalid JSON (Status: ${response.status}):\n${rawText.slice(0, 500)}` });
       }
       
-      if (!isClientDisconnected && !res.socket?.destroyed) {
-         res.write(JSON.stringify(data));
-         res.end();
-      }
+      res.json(data);
 
       if (isClientDisconnected && syncProps && assistantId && data.data && data.data[0]) {
           let finalImageUrl = data.data[0].url || (data.data[0].b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
@@ -290,12 +282,14 @@ async function startServer() {
       }
     } catch (e: any) {
       console.error('Image API Error:', e);
-      res.status(500).json({ error: e.message || 'Internal Server Error' });
+      if (!res.headersSent) {
+         res.status(500).json({ error: e.message || 'Internal Server Error' });
+      }
     }
   });
 
   // Proxy for fetching images to bypass CORS
-  app.get('/api/proxy-image', async (req, res) => {
+  app.get(['/api/srv-media-loader', '/api/v1/loader'], async (req, res) => {
     try {
       const imageUrl = req.query.url as string;
       if (!imageUrl) return res.status(400).send('Missing url');

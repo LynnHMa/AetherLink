@@ -22,6 +22,18 @@ interface Message {
   model?: string;
   isError?: boolean;
   isRetrying?: boolean;
+  debugData?: {
+    requestUrl: string;
+    requestMethod: string;
+    requestHeaders: Record<string, string>;
+    requestPayload: any;
+    errorName?: string;
+    errorMessage?: string;
+    errorStack?: string;
+    browserOnline?: boolean;
+    userAgent?: string;
+    currentTime?: string;
+  };
 }
 
 interface ChatSession {
@@ -41,6 +53,7 @@ const i18n = {
     shareThread: '分享对话',
     hello: '您好! 我是AI助手。',
     helloSub: '在左侧设置您的 API Key 及 Base URL。之后可以直接与我对话或者生成图片。',
+    storageQuotaError: '本地存储已满！通常是因为图片体积过多过大。请在历史记录中删除旧对话，或者连接云端同步。',
     userRequest: '用户请求',
     assistantResponse: '助手回复',
     sendPlaceholderText: '发送消息 (Shift+Enter 换行)...',
@@ -113,6 +126,7 @@ const i18n = {
     shareThread: 'Share Thread',
     hello: 'Hello! I am your AI assistant.',
     helloSub: 'Configure your API Key and Base URL on the left. Then you can chat with me or generate images.',
+    storageQuotaError: 'Local storage is full! Usually due to large images. Please delete old chats or enable cloud sync.',
     userRequest: 'User Request',
     assistantResponse: 'Assistant Response',
     sendPlaceholderText: 'Send a message...',
@@ -190,7 +204,14 @@ const THEME_COLORS: Record<string, { bg: string, text: string, border: string, b
 export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = localStorage.getItem('llm_sessions');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error("Failed to parse llm_sessions from localStorage", e);
+      }
+    }
     return [];
   });
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
@@ -273,9 +294,18 @@ export default function App() {
 
   useEffect(() => {
     if (sessions.length > 0) {
-      localStorage.setItem('llm_sessions', JSON.stringify(sessions));
+      try {
+        localStorage.setItem('llm_sessions', JSON.stringify(sessions));
+      } catch (e: any) {
+        if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
+          alert(t.storageQuotaError);
+          console.error("QuotaExceededError while saving sessions.", e);
+        } else {
+          console.error("Failed to save sessions to localStorage", e);
+        }
+      }
     }
-  }, [sessions]);
+  }, [sessions, t.storageQuotaError]);
 
   useEffect(() => {
     if (currentSessionId) localStorage.setItem('llm_current_session_id', currentSessionId);
@@ -338,11 +368,27 @@ export default function App() {
 
   const [chatModels, setChatModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('llm_chat_models');
-    return saved ? JSON.parse(saved) : ['claude-opus-4.7', 'gpt-4o-latest', 'gpt-3.5-turbo'];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error("Failed to parse llm_chat_models from localStorage", e);
+      }
+    }
+    return ['claude-opus-4.7', 'gpt-4o-latest', 'gpt-3.5-turbo'];
   });
   const [imageModels, setImageModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('llm_image_models');
-    return saved ? JSON.parse(saved) : ['gpt2', 'dall-e-3', 'stable-diffusion-xl'];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error("Failed to parse llm_image_models from localStorage", e);
+      }
+    }
+    return ['gpt2', 'dall-e-3', 'stable-diffusion-xl'];
   });
 
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -559,7 +605,7 @@ export default function App() {
     while (!isSuccess) {
       attempt++;
       try {
-        const response = await fetch('/api/chat', {
+        const response = await fetch('/api/v1/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -577,7 +623,9 @@ export default function App() {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+          const err: any = new Error(errorData.error || `HTTP error! status: ${response.status}`);
+          err.status = response.status;
+          throw err;
         }
 
         if (!response.body) throw new Error('No response body');
@@ -617,15 +665,62 @@ export default function App() {
         isSuccess = true;
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, isRetrying: false } : m));
       } catch (error: any) {
-        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId)) {
+        const isClientError = error && error.status >= 400 && error.status < 500;
+        const maxAttemptsExceeded = attempt >= 3;
+
+        let displayError = error?.message || String(error || 'Unknown error');
+        if (error?.message === 'Failed to fetch' || error?.message?.includes('fetch')) {
+          displayError = 'Failed to fetch / 无法建立网络连接。\n\n⚠️ **排查提示 (Troubleshooting Hints):**\n1. **浏览器拦截 (Ad Blockers):** 发现您遇到了浏览器底层网络连接错误。请检查是否启用了广告拦截插件 (如 **uBlock Origin**, **AdBlock Plus**, **Brave Shield**, **Privacy Badger** 或某些反跟踪插件)，它们可能会因为 URL 关键词拦截请求。请尝试禁用相关插件或在其它浏览器中重试。\n2. **服务端地址错误 (Base URL typo):** 请检查“系统设置 -> API配置”中的 **Base URL (API地址)** 是否正确、无拼写错误且服务可用。\n3. **本地网络代理 (VPN/Proxy):** 如果您使用了科学上网代理, 请确认代理没有拦截本地回环/本地测试域名请求。';
+        }
+
+        if (isClientError) {
+          displayError += ' (Client error: auto-retry disabled / 客户端错误，已自动停止重试)';
+        } else if (maxAttemptsExceeded) {
+          displayError += ' (Max retries reached / 已达到最大重试次数上限)';
+        }
+
+        const debugInfo = {
+          requestUrl: '/api/v1/completions',
+          requestMethod: 'POST',
+          requestHeaders: {
+            'Content-Type': 'application/json'
+          },
+          requestPayload: {
+            model: chatModel,
+            baseUrl: baseUrl || '(Not provided / 未设置)',
+            apiKeyMasked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)} (${apiKey.length} chars)` : '(Not provided / 未设置)',
+            messagesCount: newChatHistory.length,
+            stream: true,
+            assistantId
+          },
+          errorName: error?.name || 'Error',
+          errorMessage: error?.message || String(error || 'Failed to fetch'),
+          errorStack: error?.stack || 'No manual stack trace available.',
+          browserOnline: window.navigator.onLine,
+          userAgent: window.navigator.userAgent,
+          currentTime: new Date().toISOString()
+        };
+        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId) || isClientError || maxAttemptsExceeded) {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error:** ${error.message}`, isError: true, isRetrying: false } : m
+            m.id === assistantId ? { 
+              ...m, 
+              content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error:** ${displayError}`, 
+              isError: true, 
+              isRetrying: false,
+              debugData: debugInfo
+            } : m
           ));
           cancelRetryIdsRef.current.delete(assistantId);
           break;
         } else {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `**Error:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false, isRetrying: true } : m
+            m.id === assistantId ? { 
+              ...m, 
+              content: `**Error:** ${displayError}\n\n*Retrying automatically (Attempt ${attempt})...*`, 
+              isError: false, 
+              isRetrying: true,
+              debugData: debugInfo
+            } : m
           ));
           
           let waited = 0;
@@ -653,21 +748,13 @@ export default function App() {
     
     let isSuccess = false;
     let attempt = 0;
+    let payload: any = null;
     while (!isSuccess) {
       attempt++;
       try {
         const allMsgs = [...messages, userMsg];
         
-        let targetImages: string[] = [];
-        const latestWithImage = [...allMsgs].reverse().find(m => (m.images && m.images.length > 0) || m.imageUrl);
-        
-        if (latestWithImage) {
-          if (latestWithImage.images && latestWithImage.images.length > 0) {
-            targetImages = [...latestWithImage.images];
-          } else if (latestWithImage.imageUrl) {
-            targetImages = [latestWithImage.imageUrl];
-          }
-        }
+        let targetImages: string[] = userMsg.images && userMsg.images.length > 0 ? [...userMsg.images] : [];
 
         let finalPrompt = userMsg.content;
         const userPrompts = allMsgs.filter(m => m.role === 'user' && m.content).map(m => m.content);
@@ -685,7 +772,7 @@ export default function App() {
           sizeStr = "1024x1024";
         }
 
-        const payload: any = {
+        payload = {
             prompt: finalPrompt,
             model: imageModel,
             size: sizeStr,
@@ -698,7 +785,7 @@ export default function App() {
           const processedImages = await Promise.all(targetImages.map(async (img) => {
             if (!img.startsWith('data:')) {
               try {
-                const fetchUrl = `/api/proxy-image?url=${encodeURIComponent(img)}`;
+                const fetchUrl = `/api/v1/loader?url=${encodeURIComponent(img)}`;
                 const res = await fetch(fetchUrl);
                 const blob = await res.blob();
                 return await new Promise<string>((resolve, reject) => {
@@ -718,7 +805,7 @@ export default function App() {
           payload.images = processedImages;
         }
 
-        const response = await fetch('/api/image', {
+        const response = await fetch('/api/v1/paintings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -728,11 +815,14 @@ export default function App() {
 
         if (!response.ok) {
            let errMsg = await response.text();
+           let errStatus = response.status;
            try {
              const errObj = JSON.parse(errMsg);
              errMsg = errObj.error?.message || errObj.error || errMsg;
            } catch(e) {}
-           throw new Error(`API Proxy Error (${response.status}): ${errMsg}`);
+           const err: any = new Error(`API Proxy Error (${response.status}): ${errMsg}`);
+           err.status = errStatus;
+           throw err;
         }
 
         let data;
@@ -745,7 +835,9 @@ export default function App() {
         }
 
         if (data._statusError) {
-          throw new Error(`API Proxy Error (${data._statusError}): ${data.error || 'Unknown error'}`);
+          const err: any = new Error(`API Proxy Error (${data._statusError}): ${data.error || 'Unknown error'}`);
+          err.status = data._statusError;
+          throw err;
         }
 
         let finalImageUrl = data.data?.[0]?.url || (data.data?.[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null);
@@ -753,7 +845,7 @@ export default function App() {
         if (finalImageUrl) {
           if (!finalImageUrl.startsWith('data:')) {
              try {
-                const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(finalImageUrl)}`);
+                const res = await fetch(`/api/v1/loader?url=${encodeURIComponent(finalImageUrl)}`);
                 if (res.ok) {
                    const blob = await res.blob();
                    finalImageUrl = await new Promise((resolve) => {
@@ -776,15 +868,63 @@ export default function App() {
         isSuccess = true;
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, isRetrying: false } : m));
       } catch (error: any) {
-        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId)) {
+        const isClientError = error && error.status >= 400 && error.status < 500;
+        const maxAttemptsExceeded = attempt >= 3;
+
+        let displayError = error?.message || String(error || 'Unknown error');
+        if (error?.message === 'Failed to fetch' || error?.message?.includes('fetch')) {
+          displayError = 'Failed to fetch / 无法建立网络连接。\n\n⚠️ **排查提示 (Troubleshooting Hints):**\n1. **浏览器拦截 (Ad Blockers):** 发现您遇到了浏览器底层网络连接错误。请检查是否启用了广告拦截插件 (如 **uBlock Origin**, **AdBlock Plus**, **Brave Shield**, **Privacy Badger**)，它们可能会因为 URL 关键词拦截请求。请尝试禁用相关插件或在其它浏览器中重试。\n2. **服务端地址错误 (Base URL typo):** 请检查“系统设置 -> API配置”中的 **Base URL (API地址)** 是否正确、无拼写错误且服务可用。\n3. **科学上网配置 (VPN/Proxy):** 如果您使用了科学上网代理, 请确认代理没有拦截本地回环/本地测试域名请求。';
+        }
+
+        if (isClientError) {
+          displayError += ' (Client error: auto-retry disabled / 客户端错误，已自动停止重试)';
+        } else if (maxAttemptsExceeded) {
+          displayError += ' (Max retries reached / 已达到最大重试次数上限)';
+        }
+
+        const debugInfo = {
+          requestUrl: '/api/v1/paintings',
+          requestMethod: 'POST',
+          requestHeaders: {
+            'Content-Type': 'application/json'
+          },
+          requestPayload: {
+            model: imageModel,
+            baseUrl: baseUrl || '(Not provided / 未设置)',
+            apiKeyMasked: apiKey ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)} (${apiKey.length} chars)` : '(Not provided / 未设置)',
+            prompt: payload?.prompt || '(Prompt undefined)',
+            size: payload?.size || '(Default size)',
+            n: payload?.n || 1,
+            assistantId
+          },
+          errorName: error?.name || 'Error',
+          errorMessage: error?.message || String(error || 'Failed to fetch'),
+          errorStack: error?.stack || 'No manual stack trace available.',
+          browserOnline: window.navigator.onLine,
+          userAgent: window.navigator.userAgent,
+          currentTime: new Date().toISOString()
+        };
+        if (!autoRetryRef.current || cancelRetryIdsRef.current.has(assistantId) || isClientError || maxAttemptsExceeded) {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error Generating Image:** ${error.message}`, isError: true, isRetrying: false } : m
+            m.id === assistantId ? { 
+              ...m, 
+              content: m.content.replace(/\n\n\*Retrying automatically.*/, '') + `\n\n**Error Generating Image:** ${displayError}`, 
+              isError: true, 
+              isRetrying: false,
+              debugData: debugInfo
+            } : m
           ));
           cancelRetryIdsRef.current.delete(assistantId);
           break;
         } else {
           setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...m, content: `**Error Generating Image:** ${error.message}\n\n*Retrying automatically (Attempt ${attempt})...*`, isError: false, isRetrying: true } : m
+            m.id === assistantId ? { 
+              ...m, 
+              content: `**Error Generating Image:** ${displayError}\n\n*Retrying automatically (Attempt ${attempt})...*`, 
+              isError: false, 
+              isRetrying: true,
+              debugData: debugInfo
+            } : m
           ));
           
           let waited = 0;
@@ -944,7 +1084,7 @@ export default function App() {
     try {
       let fetchUrl = url;
       if (!url.startsWith('data:')) {
-         fetchUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+         fetchUrl = `/api/v1/loader?url=${encodeURIComponent(url)}`;
       }
 
       await navigator.clipboard.write([
@@ -1305,14 +1445,24 @@ export default function App() {
                       if (Array.isArray(data)) {
                         setSessions(data);
                         if (data.length > 0) setCurrentSessionId(data[0].id);
-                        localStorage.setItem('llm_sessions', JSON.stringify(data));
-                        alert(t.importSuccess);
+                        try {
+                          localStorage.setItem('llm_sessions', JSON.stringify(data));
+                          alert(t.importSuccess);
+                        } catch (err: any) {
+                          if (err.name === 'QuotaExceededError' || err.message?.includes('quota')) alert(t.storageQuotaError);
+                          else console.error(err);
+                        }
                       } else if (data && typeof data === 'object' && data.id && Array.isArray(data.messages)) {
                         // Single chat import
                         setSessions(prev => {
                           const exists = prev.find(s => s.id === data.id);
                           const newSess = exists ? prev.map(s => s.id === data.id ? data : s) : [data, ...prev];
-                          localStorage.setItem('llm_sessions', JSON.stringify(newSess));
+                          try {
+                            localStorage.setItem('llm_sessions', JSON.stringify(newSess));
+                          } catch (err: any) {
+                            if (err.name === 'QuotaExceededError' || err.message?.includes('quota')) alert(t.storageQuotaError);
+                            else console.error(err);
+                          }
                           return newSess;
                         });
                         setCurrentSessionId(data.id);
@@ -1476,7 +1626,7 @@ export default function App() {
                                 e.preventDefault();
                                 let fetchUrl = msg.imageUrl!;
                                 if (!fetchUrl.startsWith('data:')) {
-                                   fetchUrl = `/api/proxy-image?url=${encodeURIComponent(fetchUrl)}`;
+                                   fetchUrl = `/api/v1/loader?url=${encodeURIComponent(fetchUrl)}`;
                                 }
                                 fetch(fetchUrl)
                                   .then(res => res.blob())
@@ -1523,6 +1673,86 @@ export default function App() {
                               <StopCircle className="w-4 h-4" />
                               Stop Retry
                             </button>
+                          )}
+                          {msg.debugData && (
+                            <div className="mt-4 border border-red-500/20 bg-black/40 rounded-xl p-4 text-xs font-mono text-gray-300 w-full overflow-hidden max-w-full">
+                              <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-3">
+                                <span className="text-red-400 font-bold flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
+                                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block" />
+                                  Connection Diagnostic Console (网络诊断控制台)
+                                </span>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(msg.debugData, null, 2));
+                                  }}
+                                  className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[10px] text-gray-400 hover:text-white rounded border border-white/5 flex items-center gap-1 transition-all"
+                                >
+                                  复制诊断数据 (Copy JSON)
+                                </button>
+                              </div>
+                              
+                              <div className="space-y-4 max-w-full">
+                                <div className="grid grid-cols-2 gap-2 text-[11px] bg-white/[0.02] p-2 rounded-lg border border-white/5">
+                                  <div>
+                                    <span className="text-gray-500 block text-[9px] uppercase">Error Type:</span>
+                                    <span className="text-red-400 font-semibold">{msg.debugData.errorName || 'Error'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 block text-[9px] uppercase">Online Status:</span>
+                                    <span>{msg.debugData.browserOnline ? '🟢 Connected (在线)' : '🔴 Offline (断网)'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 block text-[9px] uppercase">HTTP Target (API):</span>
+                                    <span className="text-blue-400 break-all">{msg.debugData.requestUrl}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 block text-[9px] uppercase">Local Time:</span>
+                                    <span className="text-gray-400 text-[10px]">{msg.debugData.currentTime}</span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div>
+                                    <span className="text-gray-500 text-[10px] uppercase block mb-1">ErrorMessage (详细错误消息):</span>
+                                    <pre className="p-2.5 bg-red-950/20 text-red-300 rounded border border-red-900/30 font-mono text-[11px] whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                                      {msg.debugData.errorMessage || 'No specific message.'}
+                                    </pre>
+                                  </div>
+
+                                  <div>
+                                    <span className="text-gray-500 text-[10px] uppercase block mb-1">Request Payload Masked (发送负载 - 已脱敏):</span>
+                                    <pre className="p-2.5 bg-zinc-900 border border-white/5 text-emerald-400 rounded font-mono text-[11px] overflow-x-auto whitespace-pre">
+                                      {JSON.stringify(msg.debugData.requestPayload, null, 2)}
+                                    </pre>
+                                  </div>
+
+                                  {msg.debugData.errorStack && (
+                                    <div>
+                                      <span className="text-gray-500 text-[10px] uppercase block mb-1">Call Stack (调用栈):</span>
+                                      <pre className="p-2.5 bg-black text-gray-400 rounded text-[10px] whitespace-pre-wrap break-all font-mono max-h-32 overflow-y-auto border border-white/5">
+                                        {msg.debugData.errorStack}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  <div>
+                                    <span className="text-gray-500 text-[10px] uppercase block mb-1">UserAgent (浏览器信息):</span>
+                                    <div className="p-2 bg-zinc-950 text-gray-500 rounded text-[10px] leading-normal font-mono break-all max-h-16 overflow-y-auto border border-white/5">
+                                      {msg.debugData.userAgent}
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="mt-2 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3 text-yellow-400/90 text-[11px] leading-relaxed">
+                                  <b className="text-yellow-400 block mb-1">💡 针对 "Failed to fetch" (网络连接失败) 的技术分析与调试技巧：</b>
+                                  <ul className="list-disc list-inside space-y-1 text-gray-400">
+                                    <li><b>广告屏蔽插件干扰：</b> 超过 90% 的 "Failed to fetch" 错误是由类似 <span className="text-yellow-400">uBlock Origin</span>, <span className="text-yellow-400">AdBlock</span> 或 <span className="text-yellow-400">Brave Shield</span> 等安全插件拦截导致的。它们拦截了包含 `/api` 的本地/流式请求。请暂时<b>关闭插件</b>并重新发送。</li>
+                                    <li><b>CORS / 跨域限制：</b> 当前客户端通过自定义的本站 API 转发器发送。如果您的 Base URL 设置为了非标准端口，请确保没有被您的企业 VPN/防火墙拦截。</li>
+                                    <li><b>建议操作：</b> 按下键盘键盘上的 <kbd className="px-1 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-white">F12</kbd> 打开浏览器开发者工具，点击右上角的 <b>Consoles (控制台)</b> 或 <b>Network (网络)</b> 栏，观察是否有红色拦截条目，并<b>截图</b>给我们看。</li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}
