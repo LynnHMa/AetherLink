@@ -186,9 +186,10 @@ async function startServer() {
           
           if (i === 0) {
             formData.append('image', blob, filename);
+          } else if (i === 1) {
+             formData.append('mask', blob, filename);
           } else {
-             formData.append('image', blob, filename);
-             if (i === 1) formData.append('mask', blob, filename);
+             formData.append(`image${i}`, blob, filename);
           }
         }
 

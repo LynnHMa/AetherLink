@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import localforage from 'localforage';
 import { auth } from './lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 import { saveSettingsToFirebase, loadSettingsFromFirebase, saveSessionToFirebase, loadSessionsFromFirebase, deleteSessionFromFirebase } from './lib/sync';
@@ -202,22 +203,9 @@ const THEME_COLORS: Record<string, { bg: string, text: string, border: string, b
 };
 
 export default function App() {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const saved = localStorage.getItem('llm_sessions');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) {
-        console.error("Failed to parse llm_sessions from localStorage", e);
-      }
-    }
-    return [];
-  });
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
-    const saved = localStorage.getItem('llm_current_session_id');
-    return saved || '';
-  });
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [isSessionsLoaded, setIsSessionsLoaded] = useState(false);
 
   const [input, setInput] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -283,33 +271,73 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (sessions.length === 0) {
-      const id = Date.now().toString();
-      setSessions([{ id, title: t.newChat, createdAt: Date.now(), messages: [] }]);
-      setCurrentSessionId(id);
-    } else if (!currentSessionId || !sessions.find(s => s.id === currentSessionId)) {
-      setCurrentSessionId(sessions[0].id);
-    }
-  }, [sessions, currentSessionId, t.newChat]);
-
-  useEffect(() => {
-    if (sessions.length > 0) {
+    const loadSessions = async () => {
       try {
-        localStorage.setItem('llm_sessions', JSON.stringify(sessions));
-      } catch (e: any) {
-        if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
-          alert(t.storageQuotaError);
-          console.error("QuotaExceededError while saving sessions.", e);
-        } else {
-          console.error("Failed to save sessions to localStorage", e);
+        const saved = await localforage.getItem<string>('llm_sessions');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSessions(parsed);
+              const curId = await localforage.getItem<string>('llm_current_session_id');
+              if (curId && parsed.find(s => s.id === curId)) {
+                setCurrentSessionId(curId);
+              } else {
+                setCurrentSessionId(parsed[0].id);
+              }
+              setIsSessionsLoaded(true);
+              return;
+            }
+          } catch (e) {}
         }
+        
+        const legacySaved = localStorage.getItem('llm_sessions');
+        if (legacySaved) {
+          try {
+            const parsed = JSON.parse(legacySaved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSessions(parsed);
+              const curId = localStorage.getItem('llm_current_session_id');
+              if (curId && parsed.find(s => s.id === curId)) {
+                setCurrentSessionId(curId);
+              } else {
+                setCurrentSessionId(parsed[0].id);
+              }
+              await localforage.setItem('llm_sessions', legacySaved);
+              localStorage.removeItem('llm_sessions');
+              setIsSessionsLoaded(true);
+              return;
+            }
+          } catch (e) {}
+        }
+
+        const id = Date.now().toString();
+        const initialSess = { id, title: t.newChat, createdAt: Date.now(), messages: [] };
+        setSessions([initialSess]);
+        setCurrentSessionId(id);
+        setIsSessionsLoaded(true);
+      } catch (e) {
+        console.error("Localforage load error", e);
+        setIsSessionsLoaded(true);
       }
-    }
-  }, [sessions, t.storageQuotaError]);
+    };
+    loadSessions();
+  }, [t.newChat]);
 
   useEffect(() => {
-    if (currentSessionId) localStorage.setItem('llm_current_session_id', currentSessionId);
-  }, [currentSessionId]);
+    if (isSessionsLoaded && sessions.length > 0) {
+      localforage.setItem('llm_sessions', JSON.stringify(sessions)).catch(e => {
+        console.error("localforage save error", e);
+        alert(t.storageQuotaError);
+      });
+    }
+  }, [sessions, isSessionsLoaded, t.storageQuotaError]);
+
+  useEffect(() => {
+    if (isSessionsLoaded && currentSessionId) {
+      localforage.setItem('llm_current_session_id', currentSessionId).catch(console.error);
+    }
+  }, [currentSessionId, isSessionsLoaded]);
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const messages = currentSession?.messages || [];
@@ -1087,38 +1115,51 @@ export default function App() {
          fetchUrl = `/api/v1/loader?url=${encodeURIComponent(url)}`;
       }
 
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'image/png': new Promise<Blob>(async (resolve, reject) => {
-            try {
-              const response = await fetch(fetchUrl);
-              const blob = await response.blob();
-              
-              const imageBitmap = await createImageBitmap(blob);
-              const canvas = document.createElement('canvas');
-              canvas.width = imageBitmap.width;
-              canvas.height = imageBitmap.height;
-              const ctx = canvas.getContext('2d');
-              
-              if (ctx) {
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(imageBitmap, 0, 0);
-                canvas.toBlob((b) => {
-                  if (b) resolve(b);
-                  else reject(new Error('Canvas toBlob failed'));
-                }, 'image/png');
-              } else {
-                resolve(blob);
-              }
-            } catch(e) {
-              reject(e);
-            }
-          })
-        })
-      ]);
-    } catch (err) {
+      const makePngBlob = async () => {
+        const response = await fetch(fetchUrl);
+        const blob = await response.blob();
+        const imageBitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = imageBitmap.width;
+        canvas.height = imageBitmap.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas context not available');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(imageBitmap, 0, 0);
+        return new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => {
+            if (b) resolve(b);
+            else reject(new Error('Canvas toBlob failed'));
+          }, 'image/png');
+        });
+      };
+
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        try {
+          // Safari requires Promise inside ClipboardItem
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'image/png': makePngBlob()
+            })
+          ]);
+        } catch (e: any) {
+          if (e.name === 'NotAllowedError') throw e; 
+          // Fallback for Chrome
+          const blob = await makePngBlob();
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'image/png': blob
+            })
+          ]);
+        }
+      } else {
+        throw new Error('Clipboard API not supported');
+      }
+      alert(lang === 'zh' ? '图片已复制到剪贴板' : 'Image copied to clipboard!');
+    } catch (err: any) {
       console.error('Failed to copy image: ', err);
+      alert((lang === 'zh' ? '复制失败: ' : 'Failed to copy: ') + (err?.message || err));
     }
   };
 
@@ -1445,25 +1486,12 @@ export default function App() {
                       if (Array.isArray(data)) {
                         setSessions(data);
                         if (data.length > 0) setCurrentSessionId(data[0].id);
-                        try {
-                          localStorage.setItem('llm_sessions', JSON.stringify(data));
-                          alert(t.importSuccess);
-                        } catch (err: any) {
-                          if (err.name === 'QuotaExceededError' || err.message?.includes('quota')) alert(t.storageQuotaError);
-                          else console.error(err);
-                        }
+                        alert(t.importSuccess);
                       } else if (data && typeof data === 'object' && data.id && Array.isArray(data.messages)) {
                         // Single chat import
                         setSessions(prev => {
                           const exists = prev.find(s => s.id === data.id);
-                          const newSess = exists ? prev.map(s => s.id === data.id ? data : s) : [data, ...prev];
-                          try {
-                            localStorage.setItem('llm_sessions', JSON.stringify(newSess));
-                          } catch (err: any) {
-                            if (err.name === 'QuotaExceededError' || err.message?.includes('quota')) alert(t.storageQuotaError);
-                            else console.error(err);
-                          }
-                          return newSess;
+                          return exists ? prev.map(s => s.id === data.id ? data : s) : [data, ...prev];
                         });
                         setCurrentSessionId(data.id);
                         alert(t.importSuccess);
